@@ -9,6 +9,6 @@ A highlighted risk arrow = account is currently wounded
 
 ![image](https://github.com/user-attachments/assets/c0072979-63b6-4836-a05a-5073aac203bd)
 
-At 100% the use algo suggest that you are about equal in power and thus moderate rish. 50% is very dangerous, and 150% should be relatively and not risky to attack. The account below is about equal in power, and is already wounded as indicated by the Red border and warning symbol 
+At 100% the algo suggests that you are about equal in power and thus moderate rish. 50% is very dangerous, and 150% should be relatively and not risky to attack. The account below is about equal in power, and is already wounded as indicated by the Red border and warning symbol 
 
 ![image](https://github.com/user-attachments/assets/fa653f07-a7ea-4d71-9c42-d2868d7ff05d)
