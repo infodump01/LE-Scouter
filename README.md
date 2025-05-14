@@ -55,7 +55,7 @@ At 100% the algo suggests that you are about equal in power and thus moderate ri
 **Remote Update URL:**
 
 ```
-https://raw.githubusercontent.com/infodump01/LE-Scouter/main/LE_Scouter_Base_v1.0.user.js
+https://raw.githubusercontent.com/infodump01/LE-Scouter/main/LE_Scouter_Working_Prototype.js
 ```
 
 ---
