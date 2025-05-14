@@ -1,9 +1,9 @@
 // ==UserScript==
-// @name         LE Scouter Enhanced v10.6-LiveAdjust
+// @name         LE Scouter Base v1.0
 // @namespace    Violentmonkey Scripts
 // @match        https://www.torn.com/*
-// @version      10.6
-// @description  RSI badges on profiles with life-adjustment and overlays on all account listings; compatible with Tampermonkey and Torn PDA
+// @version      1.0
+// @description  Base release: RSI badges on profiles with life-adjustment and overlays on all account listings; compatible with Tampermonkey and Torn PDA
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
 // @grant        GM_setValue
@@ -11,6 +11,8 @@
 // @grant        GM_deleteValue
 // @grant        GM_registerMenuCommand
 // @connect      api.torn.com
+// @updateURL    https://raw.githubusercontent.com/infodump01/LE-Scouter/main/LE_Scouter_Base_v1.0.user.js
+// @downloadURL  https://raw.githubusercontent.com/infodump01/LE-Scouter/main/LE_Scouter_Base_v1.0.user.js
 // ==/UserScript==
 
 (() => {
@@ -35,14 +37,18 @@
     // ---- Key Management ----
     let API_KEY = rD_getValue('api_key', null);
     rD_registerMenuCommand('LE Scouter: Change API Key', () => {
-        rD_deleteValue('api_key'); API_KEY = null;
-        alert('API key cleared. Reload to enter new key.'); location.reload();
+        rD_deleteValue('api_key');
+        API_KEY = null;
+        alert('API key cleared. Reload to enter new key.');
+        location.reload();
     });
     if (!API_KEY) {
         const key = prompt('Enter your TORN API Key:');
         if (!key) { alert('API Key required'); throw new Error('No API key'); }
-        rD_setValue('api_key', key); API_KEY = key;
-        alert('API key saved. Reloading...'); location.reload();
+        rD_setValue('api_key', key);
+        API_KEY = key;
+        alert('API key saved. Reloading...');
+        location.reload();
     }
 
     // ---- Styles ----
@@ -51,21 +57,26 @@
         .ff-score-badge.high { background:#c62828; }
         .ff-score-badge.med  { background:#f9a825; }
         .ff-score-badge.low  { background:#2e7d32; }
+        .ff-score-badge.wounded { box-shadow:0 0 6px 2px rgba(229,57,53,0.8); }
         .ff-list-arrow { position:absolute; top:50%; transform:translate(-50%,-50%); width:0; height:0; border-top:8px solid transparent; border-bottom:8px solid transparent; pointer-events:none; }
         .ff-list-arrow.low  { border-right:12px solid #2e7d32; }
         .ff-list-arrow.med  { border-right:12px solid #f9a825; }
         .ff-list-arrow.high { border-right:12px solid #c62828; }
+        .ff-list-arrow.wounded { box-shadow:0 0 6px 2px rgba(229,57,53,0.8); }
     `);
 
     // ---- API GET ----
     function apiGet(endpoint, cb) {
         rD_xmlhttpRequest({
-            method: 'GET', url: `https://api.torn.com${endpoint}&key=${API_KEY}`,
+            method: 'GET',
+            url: `https://api.torn.com${endpoint}&key=${API_KEY}`,
             onload: resp => {
                 try {
                     const data = JSON.parse(resp.responseText);
                     if (!data.error) cb(data);
-                } catch (e) { console.error('apiGet error', e); }
+                } catch (e) {
+                    console.error('apiGet error', e);
+                }
             }
         });
     }
@@ -79,19 +90,21 @@
         const winRate  = (ps.attackswon + ps.attackslost) > 0 ? ps.attackswon / (ps.attackswon + ps.attackslost) : 0;
         const critRate = ps.attackhits > 0 ? ps.attackcriticalhits / ps.attackhits : 0;
         const wealth   = Math.log10((ps.networth||0) + 1) * 5;
-        const nowSec   = Date.now() / 1000;
+        const nowSec   = Date.now()/1000;
         const joined   = basic && basic.joined ? basic.joined : nowSec;
         const age      = Math.log10(((nowSec - joined)/86400) + 1) * 5;
         const activity = Math.log10((ps.useractivity||0) + 1) * 2;
-        return elo + dmg + win + xan + winRate * 100 + critRate * 100 + wealth + age + activity;
+        return elo + dmg + win + xan + winRate*100 + critRate*100 + wealth + age + activity;
     }
-    function calculateRSI(a, b) {
-        return b > 0 ? ((a/b)*100).toFixed(2) : 'N/A';
+    function calculateRSI(a,b) {
+        return b>0 ? ((a/b)*100).toFixed(2) : 'N/A';
     }
 
     // ---- Global USER_BP ----
     let USER_BP = null;
-    apiGet('/user/?selections=personalstats,basic', me => { USER_BP = estimateBP(me.personalstats, me.basic); });
+    apiGet('/user/?selections=personalstats,basic', me => {
+        USER_BP = estimateBP(me.personalstats, me.basic);
+    });
 
     // ---- Inject Profile Badge with Life Adjustment ----
     function waitForHeader() {
@@ -103,53 +116,67 @@
         const id = m[1];
         apiGet(`/user/${id}?selections=personalstats,basic,profile`, od => {
             const oppBP = estimateBP(od.personalstats, od.basic);
-            const rawRSI = (USER_BP / oppBP) * 100;
-            // Life-based modifier
-            const life = od.profile?.life;
-            const lifePct = life ? life.current / life.maximum : 1;
+            const rawRSI = (USER_BP/oppBP)*100;
+            const lifePct = od.life.current/od.life.maximum || 1;
             const invLife = 1 - lifePct;
-            const dist = Math.abs(rawRSI - 100);
-            const closeness = Math.max(0, 1 - dist/100);
+            const dist = Math.abs(rawRSI-100);
+            const closeness = Math.max(0,1-dist/100);
             const lifeWeight = 0.1;
-            const scaledLife = invLife * closeness * lifeWeight;
-            const adjRSI = (rawRSI * (1 + scaledLife)).toFixed(2);
-            const pct = parseFloat(adjRSI);
+            const boost = invLife*closeness*lifeWeight;
+            const adj = rawRSI*(1+boost);
+            const pct = parseFloat(adj.toFixed(2));
             let cls='low', note='Advantage';
-            if (pct < 100) { cls='high'; note='High risk'; }
-            else if (pct < 120) { cls='med'; note='Moderate risk'; }
+            if (pct<100) { cls='high'; note='High risk'; }
+            else if (pct<120) { cls='med'; note='Moderate risk'; }
             const span = document.createElement('span');
             span.className = `ff-score-badge ${cls}`;
-            span.textContent = `RSI ${adjRSI}% — ${note}`;
+            span.textContent = `RSI ${pct}% — ${note}`;
+            if (lifePct<1) {
+                span.classList.add('wounded');
+                span.textContent += ' ⚠️';
+            }
             h4.appendChild(span);
         });
     }
 
-    // ---- Overlay Arrows ----
+    // ---- Overlay Arrows with Life Adjustment ----
     function processAccountNode(node) {
         if (!USER_BP || node.dataset.ffArrow) return;
-        const link = node.querySelector('a[href*="profiles.php?XID="]'); if (!link) return;
-        const id = (link.href.match(/XID=(\d+)/)||[])[1]; if (!id) return;
-        node.dataset.ffArrow = 'true'; node.style.position='relative';
-        apiGet(`/user/${id}?selections=personalstats,basic`, info => {
+        const link = node.querySelector('a[href*="profiles.php?XID="]');
+        if (!link) return;
+        const id = (link.href.match(/XID=(\d+)/)||[])[1];
+        if (!id) return;
+        node.dataset.ffArrow = 'true';
+        node.style.position = 'relative';
+        apiGet(`/user/${id}?selections=personalstats,basic,profile`, info => {
             const oppBP = estimateBP(info.personalstats, info.basic);
-            const rsi = parseFloat(calculateRSI(USER_BP, oppBP));
-            const scaled = Math.min(rsi,150)/150*100;
-            const cls = rsi<100?'high':rsi<120?'med':'low';
-            const arrow = document.createElement('span'); arrow.className=`ff-list-arrow ${cls}`;
-            arrow.style.left=(100-scaled)+'%'; node.appendChild(arrow);
+            const rawRSI = (USER_BP/oppBP)*100;
+            const lifePct = info.life.current/info.life.maximum || 1;
+            const invLife = 1 - lifePct;
+            const dist = Math.abs(rawRSI-100);
+            const closeness = Math.max(0,1-dist/100);
+            const boost = invLife*closeness*0.1;
+            const adj = rawRSI*(1+boost);
+            const cls = adj<100?'high':adj<120?'med':'low';
+            const pos = (100 - Math.min(adj,150)/150*100)+'%';
+            const arrow = document.createElement('span');
+            arrow.className = `ff-list-arrow ${cls}` + (lifePct<1?' wounded':'');
+            arrow.style.left = pos;
+            node.appendChild(arrow);
         });
     }
     function scanAndInject(root=document) {
         waitForHeader();
         root.querySelectorAll('a[href*="profiles.php?XID="]').forEach(link => {
-            let node=link.closest('tr, li, div, td'); if (!node) node=link.parentElement;
+            let node = link.closest('tr, li, div, td');
+            if (!node) node = link.parentElement;
             processAccountNode(node);
         });
     }
 
     // ---- Hooks ----
-    window.addEventListener('load', ()=> scanAndInject());
-    window.addEventListener('popstate', ()=> scanAndInject());
-    new MutationObserver(recs=>recs.forEach(r=>scanAndInject(r.target)))
+    window.addEventListener('load', ()=>scanAndInject());
+    window.addEventListener('popstate', ()=>scanAndInject());
+    new MutationObserver(ms=>ms.forEach(r=>scanAndInject(r.target)))
         .observe(document.body,{childList:true,subtree:true});
 })();
