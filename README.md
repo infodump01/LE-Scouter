@@ -1,4 +1,4 @@
-LE_Scouter_Working Prototype_v2.js is the current usable and stable .js file for both TORN PDA and PC using TamperMonkey
+LE_Scouter_Working Prototype.js is the current usable and stable .js file for both TORN PDA and PC using TamperMonkey
 
 Arrows on profiles are an indicator of RISK
 Risk goes from left to right, far left = less risk to attack and far right = more risk to attack
