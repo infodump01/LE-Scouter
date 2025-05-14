@@ -11,8 +11,8 @@
 // @grant        GM_deleteValue
 // @grant        GM_registerMenuCommand
 // @connect      api.torn.com
-// @updateURL    https://raw.githubusercontent.com/infodump01/LE-Scouter/main/LE_Scouter_Base_v1.0.user.js
-// @downloadURL  https://raw.githubusercontent.com/infodump01/LE-Scouter/main/LE_Scouter_Base_v1.0.user.js
+// @updateURL    https://raw.githubusercontent.com/infodump01/LE-Scouter/main/LE_Scouter_Working_Prototype.js
+// @downloadURL  https://raw.githubusercontent.com/infodump01/LE-Scouter/main/LE_Scouter_Working_Prototype.js
 // ==/UserScript==
 
 (() => {
