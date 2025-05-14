@@ -15,4 +15,4 @@ At 100% the algo suggests that you are about equal in power and thus moderate ri
 
 To get automatic updates in TORN PDA, this is the raw link to feed it and it will "FETCH" the code,
 
-"https://raw.githubusercontent.com/infodump01/LE-Scouter/main/LE_Scouter_Working Prototype.js"
+https://raw.githubusercontent.com/infodump01/LE-Scouter/main/LE_Scouter_Working_Prototype.js
