@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         LE Scouter Base v1.4
+// @name         LE Scouter Base v1.1
 // @namespace    Violentmonkey Scripts
 // @match        https://www.torn.com/*
 // @version      1.1
