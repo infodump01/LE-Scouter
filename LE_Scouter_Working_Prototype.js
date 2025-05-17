@@ -1,9 +1,11 @@
 // ==UserScript==
-// @name         LE Scouter Base v1.1.1
+// @name         LE Scouter Base v1.1.2
 // @namespace    Violentmonkey Scripts
 // @match        https://www.torn.com/*
-// @version      1.1.1
-// @description  API key moved into GUI with auto-open; gym-tier BP; wounded boost
+// @version      1.1.2
+// @description  API key moved into GUI; gym-tier BP; wounded boost; medical indicator inside badge
+// @updateURL    https://raw.githubusercontent.com/infodump01/LE-Scouter/main/LE_Scouter_Working_Prototype.js
+// @downloadURL  https://raw.githubusercontent.com/infodump01/LE-Scouter/main/LE_Scouter_Working_Prototype.js
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
 // @grant        GM_setValue
@@ -82,105 +84,165 @@
         const joined=b&&b.joined?b.joined:now;
         const age=Math.log10(((now-joined)/86400)+1)*5;
         const act=Math.log10((ps.useractivity||0)+1)*2;
-        const base=elo+dmg+win+wr*100+cr*100+nw+age+act;
-        return base*getGymMultiplier(ps.xantaken||0);
+        const base=elo + dmg + win + wr*100 + cr*100 + nw + age + act;
+        return base * getGymMultiplier(ps.xantaken||0);
     }
-    const gymTiers=[
-        {energy:0,mul:1}, {energy:200,mul:1.2375}, {energy:500,mul:1.45}, {energy:1000,mul:1.6},
-        {energy:2000,mul:1.7}, {energy:2750,mul:1.8}, {energy:3000,mul:1.85}, {energy:3500,mul:1.85},
-        {energy:4000,mul:2}, {energy:6000,mul:2.175}, {energy:7000,mul:2.275}, {energy:8000,mul:2.425},
-        {energy:11000,mul:2.525}, {energy:12420,mul:2.55}, {energy:18000,mul:2.7375}, {energy:18100,mul:2.785},
-        {energy:24140,mul:3}, {energy:31260,mul:3.1}, {energy:36610,mul:3.1625}, {energy:46640,mul:3.2625},
-        {energy:56520,mul:3.325}, {energy:67775,mul:3.2875}, {energy:84535,mul:3.35}, {energy:106305,mul:3.45},
+
+    const gymTiers = [
+        {energy:0,     mul:1},
+        {energy:200,   mul:1.2375},
+        {energy:500,   mul:1.45},
+        {energy:1000,  mul:1.6},
+        {energy:2000,  mul:1.7},
+        {energy:2750,  mul:1.8},
+        {energy:3000,  mul:1.85},
+        {energy:3500,  mul:1.85},
+        {energy:4000,  mul:2},
+        {energy:6000,  mul:2.175},
+        {energy:7000,  mul:2.275},
+        {energy:8000,  mul:2.425},
+        {energy:11000, mul:2.525},
+        {energy:12420, mul:2.55},
+        {energy:18000, mul:2.7375},
+        {energy:18100, mul:2.785},
+        {energy:24140, mul:3},
+        {energy:31260, mul:3.1},
+        {energy:36610, mul:3.1625},
+        {energy:46640, mul:3.2625},
+        {energy:56520, mul:3.325},
+        {energy:67775, mul:3.2875},
+        {energy:84535, mul:3.35},
+        {energy:106305,mul:3.45},
         {energy:100000000,mul:3.65}
     ];
     function getGymMultiplier(xan){
-        const e=xan*250; let m=1;
+        const e=xan*250;
+        let m=1;
         gymTiers.forEach(t=>{ if(e>=t.energy) m=t.mul; });
         return m;
     }
 
     // ---- User BP ----
-    let USER_BP=null;
-    apiGet('/user/?selections=personalstats,basic', me=>{ USER_BP=estimateBP(me.personalstats, me.basic); });
+    let USER_BP = null;
+    apiGet('/user/?selections=personalstats,basic', me=>{
+        USER_BP = estimateBP(me.personalstats, me.basic);
+    });
 
     // ---- Inject ----
     function injectProfile(){
-        const m=location.href.match(/[?&](?:XID|user2ID)=(\d+)/); if(!m||USER_BP===null) return;
-        const h=document.querySelector('h4'); if(!h||h.dataset.ff) return; h.dataset.ff=1;
+        const m = location.href.match(/[?&](?:XID|user2ID)=(\d+)/);
+        if (!m || USER_BP===null) return;
+        const h = document.querySelector('h4');
+        if (!h || h.dataset.ff) return;
+        h.dataset.ff = 1;
         apiGet(`/user/${m[1]}?selections=personalstats,basic,profile`, o=>{
-            const opp=estimateBP(o.personalstats,o.basic), raw=(USER_BP/opp)*100;
-            const wp=1-(o.life.current/o.life.maximum||1), fair=Math.min(raw/100,1), boost=wp*settings.lifeWeight*fair;
-            const adj=raw*(1+boost), pct=parseFloat(adj.toFixed(2));
-            let cls='low', note='Advantage'; if(pct<settings.lowHigh){cls='high';note='High risk';}
-            else if(pct<settings.highMed){cls='med';note='Moderate risk';}
-            const sp=document.createElement('span'); sp.className=`ff-score-badge ${cls}`;
-            sp.textContent=`RSI ${pct}% — ${note}`; if(wp>0){sp.classList.add('wounded');sp.textContent+=' ⚠️';}
+            const opp  = estimateBP(o.personalstats, o.basic),
+                  raw  = (USER_BP/opp)*100,
+                  wp   = 1 - (o.life.current/o.life.maximum||1),
+                  fair = Math.min(raw/100,1),
+                  boost= wp * settings.lifeWeight * fair,
+                  adj  = raw*(1+boost),
+                  pct  = parseFloat(adj.toFixed(2));
+            let cls='low', note='Advantage';
+            if (pct < settings.lowHigh) { cls='high'; note='High risk'; }
+            else if (pct < settings.highMed) { cls='med'; note='Moderate risk'; }
+            const sp = document.createElement('span');
+            sp.className = `ff-score-badge ${cls}` +
+                           (wp>0?' wounded':'');
+            // place medical cross inside:
+            sp.innerHTML = `RSI ${pct}% — ${note}` +
+                (wp>0?` <span style="margin-left:4px;">✚</span>`:'');
             h.appendChild(sp);
         });
     }
     function injectList(root=document){
         injectProfile();
         root.querySelectorAll('a[href*="profiles.php?XID="]').forEach(a=>{
-            const n=a.closest('tr,li,div,td')||a.parentNode; if(n.dataset.ff) return;
-            n.dataset.ff=1; n.style.position='relative';
+            const n = a.closest('tr,li,div,td')||a.parentNode;
+            if (n.dataset.ff) return;
+            n.dataset.ff = 1;
+            n.style.position='relative';
             apiGet(`/user/${a.href.match(/XID=(\d+)/)[1]}?selections=personalstats,basic,profile`, d=>{
-                const opp=estimateBP(d.personalstats,d.basic), raw=(USER_BP/opp)*100;
-                const wp=1-(d.life.current/d.life.maximum||1), fair=Math.min(raw/100,1), boost=wp*settings.lifeWeight*fair;
-                const adj=raw*(1+boost), cls=adj<settings.lowHigh?'high':adj<settings.highMed?'med':'low';
-                const pos=(100-Math.min(adj,200)/200*100)+'%';
-                const el=document.createElement('span'); el.className=`ff-list-arrow ${cls}`+(wp>0?' wounded':'');
-                el.style.left=pos; n.appendChild(el);
+                const opp  = estimateBP(d.personalstats, d.basic),
+                      raw  = (USER_BP/opp)*100,
+                      wp   = 1 - (d.life.current/d.life.maximum||1),
+                      fair = Math.min(raw/100,1),
+                      boost= wp * settings.lifeWeight * fair,
+                      adj  = raw*(1+boost),
+                      cls  = adj<settings.lowHigh?'high':adj<settings.highMed?'med':'low',
+                      pos  = (100 - Math.min(adj,200)/200*100) + '%';
+                const el = document.createElement('span');
+                el.className = `ff-list-arrow ${cls}` + (wp>0?' wounded':'');
+                el.style.left = pos;
+                n.appendChild(el);
             });
         });
     }
 
     // ---- GUI & Modal ----
-    const fab=document.createElement('div'); fab.className='ff-fab'; fab.textContent='⚙️'; document.body.appendChild(fab);
-    const backdrop=document.createElement('div'); backdrop.className='ff-modal-backdrop'; document.body.appendChild(backdrop);
-    const modal=document.createElement('div'); modal.className='ff-modal';
-    modal.innerHTML=`<div class="ff-tabs">
+    const fab      = document.createElement('div'); fab.className='ff-fab';      fab.textContent='⚙️'; document.body.appendChild(fab);
+    const backdrop = document.createElement('div'); backdrop.className='ff-modal-backdrop'; document.body.appendChild(backdrop);
+    const modal    = document.createElement('div'); modal.className='ff-modal';
+    modal.innerHTML = `
+      <div class="ff-tabs">
         <div class="ff-tab active" data-tab="settings">Settings</div>
         <div class="ff-tab" data-tab="apikey">API Key</div>
-    </div>
-    <div class="ff-tab-content active" id="tab-settings">
+      </div>
+      <div class="ff-tab-content active" id="tab-settings">
         <label>High→Med cutoff (%)</label><input type="number" id="ff-th1" value="${settings.lowHigh}" min="0" max="1000">
         <label>Med→Low cutoff (%)</label><input type="number" id="ff-th2" value="${settings.highMed}" min="0" max="1000">
         <label>Life weight (0–1)</label><input type="number" step="0.01" id="ff-lw" value="${settings.lifeWeight}" min="0" max="1">
-    </div>
-    <div class="ff-tab-content" id="tab-apikey">
-        <label>API Key</label><input type="text" id="ff-key" value="${API_KEY}" placeholder="Enter API Key...">
+      </div>
+      <div class="ff-tab-content" id="tab-apikey">
+        <label>API Key</label><input type="text" id="ff-key" value="${API_KEY}" placeholder="Enter API Key…">
         <button id="ff-clear-key">Clear Key</button>
-    </div>
-    <div style="text-align:right;"><button id="ff-save">Save & Reload</button><button id="ff-cancel">Cancel</button></div>`;
+      </div>
+      <div style="text-align:right;">
+        <button id="ff-save">Save & Reload</button>
+        <button id="ff-cancel">Cancel</button>
+      </div>`;
     document.body.appendChild(modal);
+
     modal.querySelectorAll('.ff-tab').forEach(tab=>{
-        tab.onclick=()=>{
-            modal.querySelectorAll('.ff-tab, .ff-tab-content').forEach(el=>el.classList.remove('active'));
-            tab.classList.add('active');
-            modal.querySelector('#tab-'+tab.dataset.tab).classList.add('active');
-        };
+      tab.onclick = ()=>{
+        modal.querySelectorAll('.ff-tab, .ff-tab-content').forEach(el=>el.classList.remove('active'));
+        tab.classList.add('active');
+        modal.querySelector('#tab-'+tab.dataset.tab).classList.add('active');
+      };
     });
-    fab.onclick=()=>{backdrop.style.display='block'; modal.style.display='block';};
-    backdrop.onclick=cancel; modal.querySelector('#ff-cancel').onclick=cancel;
-    function cancel(){backdrop.style.display='none'; modal.style.display='none';}
-    modal.querySelector('#ff-clear-key').onclick=()=>{
-        rD_deleteValue('api_key'); API_KEY=''; document.getElementById('ff-key').value=''; alert('API key cleared');
+    fab.onclick = ()=>{ backdrop.style.display='block'; modal.style.display='block'; };
+    backdrop.onclick = cancel;
+    modal.querySelector('#ff-cancel').onclick = cancel;
+    function cancel(){
+      backdrop.style.display='none'; modal.style.display='none';
+    }
+    modal.querySelector('#ff-clear-key').onclick = ()=>{
+      rD_deleteValue('api_key');
+      API_KEY = '';
+      document.getElementById('ff-key').value = '';
+      alert('API key cleared');
     };
-    modal.querySelector('#ff-save').onclick=()=>{
-        const nk=document.getElementById('ff-key').value.trim(); if(nk){rD_setValue('api_key',nk); API_KEY=nk;}
-        const v1=parseFloat(document.getElementById('ff-th1').value);
-        const v2=parseFloat(document.getElementById('ff-th2').value);
-        const v3=parseFloat(document.getElementById('ff-lw').value);
-        if(!isNaN(v1)){settings.lowHigh=v1; rD_setValue('threshold_lowHigh',v1);}
-        if(!isNaN(v2)){settings.highMed=v2; rD_setValue('threshold_highMed',v2);}
-        if(!isNaN(v3)){settings.lifeWeight=v3; rD_setValue('lifeWeight',v3);}
-        location.reload();
+    modal.querySelector('#ff-save').onclick = ()=>{
+      const nk = document.getElementById('ff-key').value.trim();
+      if (nk) { rD_setValue('api_key', nk); API_KEY = nk; }
+      const v1 = parseFloat(document.getElementById('ff-th1').value);
+      const v2 = parseFloat(document.getElementById('ff-th2').value);
+      const v3 = parseFloat(document.getElementById('ff-lw').value);
+      if (!isNaN(v1)) { settings.lowHigh = v1; rD_setValue('threshold_lowHigh', v1); }
+      if (!isNaN(v2)) { settings.highMed = v2; rD_setValue('threshold_highMed', v2); }
+      if (!isNaN(v3)) { settings.lifeWeight = v3; rD_setValue('lifeWeight', v3); }
+      location.reload();
     };
 
     // Auto-open API tab if missing
-    if(!API_KEY){ fab.click(); modal.querySelector('[data-tab=apikey]').click(); }
+    if (!API_KEY) {
+      fab.click();
+      modal.querySelector('[data-tab=apikey]').click();
+    }
 
-    window.addEventListener('load',()=>injectList()); window.addEventListener('popstate',()=>injectList());
-    new MutationObserver(ms=>ms.forEach(r=>injectList(r.target))).observe(document.body,{childList:true,subtree:true});
+    // Hook into page changes & DOM mutations
+    window.addEventListener('load',    ()=>injectList());
+    window.addEventListener('popstate', ()=>injectList());
+    new MutationObserver(ms=>ms.forEach(r=>injectList(r.target)))
+      .observe(document.body, { childList:true, subtree:true });
 })();
