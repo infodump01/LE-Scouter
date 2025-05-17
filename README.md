@@ -1,25 +1,130 @@
+# LE Scouter
 
-# LE Scouter Base v1.0
+**Version:** v1.1.2
 
-LE_Scouter_Working Prototype.js is the current usable and stable .js file for both TORN PDA and PC using TamperMonkey
+A lightweight userscript that overlays *Relative Strength Index* (RSI) risk indicators across Torn City web interfaces (desktop via Tampermonkey and mobile via Torn PDA). It calculates and displays a risk score for opponents based on battle power estimates, gym-tier multipliers, Xanax use, and current life.
 
-**LE Scouter** is a userscript that overlays a real‑time RSI (Relative Strength Index) risk score onto user profiles and account listings across Torn.com. Designed for both desktop (Tampermonkey / Violentmonkey) and Torn PDA mobile users, it helps you quickly gauge how safe—or dangerous—it would be to attack any given opponent.
+## Features
+
+* **Cross-Platform**: Works on both desktop browsers (Tampermonkey/Greasemonkey) and the Torn PDA mobile app.
+* **RSI Badge**: Displays a colored badge on individual profile pages showing:
+
+  * RSI % (user vs. opponent battle power)
+  * Risk category: **High**, **Moderate**, or **Advantage**.
+  * Medical indicator (✚) if the opponent is wounded (life < max).
+* **Faction & List Arrows**: Overlays colored arrows on any page listing profiles (faction pages, market, message boards, etc.) pointing across the avatar/badge area:
+
+  * Position reflects RSI% (0% on right, up to 200% on left).
+  * Arrow color indicates risk category.
+  * Wounded opponents have a red glow around arrows.
+* **Gym-Tier Multiplier**: Estimates battle power boosted by Xanax stacking, using gym-tier energy thresholds to model diminishing returns.
+* **Life Weighting**: Applies a configurable penalty boost for injured opponents, scaled by how close RSI is to parity.
+* **Configurable Settings**: In-script GUI accessible via a floating ⚙️ button:
+
+  1. **High → Med cutoff (%)**: threshold where risk goes from High to Moderate.
+  2. **Med → Low cutoff (%)**: threshold where risk goes from Moderate to Advantage.
+  3. **Life Weight (0–1)**: strength of wounded penalty.
+  4. **API Key Management**: enter, clear, or change your Torn API key without editing the script.
+* **Auto-Update**: Uses `@updateURL` and `@downloadURL` pointing to the raw GitHub script for easy version tracking.
+
+## Installation
+
+1. **Desktop (Tampermonkey/Greasemonkey)**
+
+   * Install [Tampermonkey](https://www.tampermonkey.net/) or Greasemonkey.
+   * Create a new userscript and paste in the contents of `LE_Scouter_Working_Prototype.js` from GitHub raw.
+   * Save and ensure it’s enabled. Visit any Torn page to trigger the API key prompt.
+
+2. **Mobile (Torn PDA)**
+
+   * Open the Torn PDA app’s script manager.
+   * Add a new script using the raw URL:
+
+     ```
+     https://raw.githubusercontent.com/infodump01/LE-Scouter/main/LE_Scouter_Working_Prototype.js
+     ```
+   * Set injection time to **END**.
+   * Save and reload Torn PDA; you’ll be prompted to enter your API key.
+
+## Usage
+
+* **First-time Setup**: On initial load, the floating gear menu auto-opens to the **API Key** tab—paste your Torn API key and save.
+* **Viewing Risk**:
+
+  * Navigate to any user profile—look for the RSI badge under the name header.
+  * On multi-user lists (factions, market, etc.), watch for colored arrows overlaid on profile badges.
+* **Adjust Settings**: Click the ⚙️ button to open the settings modal, tweak thresholds or life weight, then save & reload.
+
+## Under the Hood
+
+1. **Battle Power Estimation**:
+
+   * Combines ELO, attack damage, win/loss ratios, crit rates, net worth, account age, and activity.
+   * Multiplies by a gym-tier factor based on `xantaken * 250` energy to model stat boosts.
+2. **RSI Calculation**:
+
+   ```js
+   raw = (USER_BP / opp_BP) * 100;
+   boost = woundedPct * lifeWeight * Math.min(raw/100, 1);
+   adjusted = raw * (1 + boost);
+   RSI = clamp(adjusted, 0, 200);
+   ```
+3. **Wounded Indicator**:
+
+   * If `opp.life.current < opp.life.maximum`, a red glow and ✚ icon appear on the badge/arrow.
+4. **DOM Injection**:
+
+   * Uses a `MutationObserver` to watch for new user links (`profiles.php?XID=`) and inject arrows in real time.
+
+## Troubleshooting
+* **No arrows or badges**: Check that your manager’s injection time is set to **END** on Torn PDA, refresh page
+* **Script not updating**: Verify the `@updateURL` and `@downloadURL` lines point to the raw GitHub URL above.
+
+## Contributing
+
+Issues and pull requests are welcome! Feel free to suggest new metrics, UI improvements, or platform-specific tweaks.
+
+## License
+
+MIT © 2025 Infodump
 
 ---
 
-## 🔥 Features
+*Made with ❤️ for the Torn community*
 
-* **Profile Badges**: Appends a colored `RSI xx.xx% — [Advantage|Moderate risk|High risk]` badge next to the user’s header on any profile page.
-* **List Overlays**: Renders an arrow inside every account listing (faction page, market, chat, etc.) positioned proportionally by RSI (green=low risk, yellow=moderate, red=high risk).
-* **Life Adjustment**: If a target is wounded (life < 100%), the script automatically boosts (up to +10%) their raw RSI and highlights their badge/arrow with a glowing red effect and warning symbol.
-* **Universal Coverage**: Automatically scans and injects on any page containing account links (`profiles.php?XID=`), including:
 
-  * Faction member lists
-  * Market listings
-  * Chat/user mentions
-  * Any custom Torn PDA page with JS injection
-* **Single API Key Prompt**: Prompts once for your Torn API key via `prompt()`, stores it securely in localStorage, and reuses it across pages.
-* **Auto‑Update Support**: Includes `@updateURL` and `@downloadURL` for seamless script updates from GitHub.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+-----
+
+
 
 Arrows on profiles are an indicator of RISK.
 Risk goes from left to right, far left = less risk to attack and far right = more risk to attack.
@@ -34,77 +139,6 @@ At 100% the algo suggests that you are about equal in power and thus moderate ri
 
 ![image](https://github.com/user-attachments/assets/fa653f07-a7ea-4d71-9c42-d2868d7ff05d)
 
-
----
-
-## ⚙️ Installation
-
-1. **Desktop (Tampermonkey / Violentmonkey):**
-
-   * Add new script and then paste code from GitHub raw script URL (see below).
-   * Make sure the script is enable, turned on in the Tampermonkey interface
-   * The first time you load a Torn page after installation, you’ll be prompted for your Torn API key.
-
-2. **Torn PDA Mobile App:**
-
-   * In the PDA script menu, add a new script, configure the "remote load" and then add the raw script URL (see below)
-   * Click "Fetch" and then Load"
-   * Set **Injection time** to **END**.
-   * Save and reload; you’ll receive the same API‑key prompt once.
-
-**Remote Update URL:**
-
-```
-https://raw.githubusercontent.com/infodump01/LE-Scouter/main/LE_Scouter_Working_Prototype.js
-```
-
----
-
-## 🔑 Configuration
-
-* **Tweak Life Weight**: In the code, adjust the `lifeWeight = 0.1` value in the badge/arrow logic to increase or decrease how much being wounded affects the final score.
-
----
-
-## 🧮 Scoring Metrics
-
-The RSI is computed by first estimating each player’s **Battle Power** via:
-
-1. **ELO** × 2
-2. √(attackdamage / 1000) × 1.5
-3. √(max(attackswon − attackslost, 0)) × 1.2
-4. √(xantaken) × 0.5
-5. Win rate (won / total) × 100
-6. Crit rate × 100
-7. Net worth: log₁₀(networth + 1) × 5
-8. Account age: log₁₀(days since signup + 1) × 5
-9. Activity: log₁₀(useractivity + 1) × 2
-
-The ratio (you ÷ opponent) × 100 yields a **raw RSI %**.
-**Life Adjustment:** If opponent’s life < 100%:
-
-```js
-boost = (1 − lifePct) × (1 − |rawRSI−100|/100) × lifeWeight
-adjRSI = rawRSI × (1 + boost)
-```
-
----
-
-## 🛠️ Troubleshooting
-
-* **No API prompt**: Clear your browser/PDA local storage for `api_key` / clear browser cache 
-* **No arrows or badges**: Check that your manager’s injection time is set to **END** on Torn PDA, refresh page
-* **Script not updating**: Verify the `@updateURL` and `@downloadURL` lines point to the raw GitHub URL above.
-
----
-
-## 📄 License
-
-MIT © 2025 Legitimate Enterprises
-
----
-
-*Made with ❤️ for the Torn community*
 
 
 
