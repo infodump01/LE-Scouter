@@ -1,11 +1,12 @@
 // ==UserScript==
-// @name         LE Scouter Base v1.2.1
+// @name         LE Scouter Base v1.2.2
 // @namespace    Violentmonkey Scripts
 // @match        https://www.torn.com/*
-// @version      1.2.1
-// @description  Two-tab dark GUI; injured+drug indicators
-// @updateURL    https://raw.githubusercontent.com/infodump01/LE-Scouter/main/LE_Scouter_Working_Prototype.js
-// @downloadURL  https://raw.githubusercontent.com/infodump01/LE-Scouter/main/LE_Scouter_Working_Prototype.js
+// @match        https://pda.torn.com/*
+// @version      1.2.2
+// @description  Two-tab dark GUI; injured+drug indicators; on profiles show Life% & “Last action” (shortened); on list pages inject larger 20×20px RSI arrows with cursor tooltips—always inject banner under the first <h4>, exactly like v1.2.1 did on PDA.
+// @updateURL    https://raw.githubusercontent.com/infodump01/LE-Scouter/main/LE_Scouter_v1.2.1_life_action_relative_tooltips_larger_plainh4.js
+// @downloadURL  https://raw.githubusercontent.com/infodump01/LE-Scouter/main/LE_Scouter_v1.2.1_life_action_relative_tooltips_larger_plainh4.js
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
 // @grant        GM_setValue
@@ -40,24 +41,56 @@
     drugWeight: +rD_getValue('drugWeight', defaults.drugWeight)
   };
 
-  // ---- Styles ----
+  // ---- Styles (larger 20×20 arrow; enable pointer-events; tooltip; red Cancel button) ----
   GM_addStyle(`
     /* Score badges */
-    .ff-score-badge { display:inline-block; margin-left:8px; padding:4px 8px; border-radius:6px; font-size:0.95em; color:#fff; }
-    .ff-score-badge.high{background:#c62828;}
-    .ff-score-badge.med {background:#f9a825;}
-    .ff-score-badge.low {background:#2e7d32;}
-    .ff-score-badge.wounded {box-shadow:0 0 6px 2px rgba(229,57,53,0.8);}
-    /* Triangle arrows */
-    .ff-list-arrow {
-      position:absolute; top:50%; transform:translate(-50%,-50%);
-      width:0; height:0; border-top:8px solid transparent;
-      border-bottom:8px solid transparent; pointer-events:none;
+    .ff-score-badge {
+      display:inline-block;
+      margin-left:8px;
+      padding:4px 8px;
+      border-radius:6px;
+      font-size:0.95em;
+      color:#fff;
     }
-    .ff-list-arrow.low {border-right:12px solid #2e7d32;}
-    .ff-list-arrow.med {border-right:12px solid #f9a825;}
-    .ff-list-arrow.high{border-right:12px solid #c62828;}
-    .ff-list-arrow.wounded {box-shadow:0 0 6px 2px rgba(229,57,53,0.8);}
+    .ff-score-badge.high  { background:#c62828; }
+    .ff-score-badge.med   { background:#f9a825; }
+    .ff-score-badge.low   { background:#2e7d32; }
+    .ff-score-badge.wounded {
+      box-shadow:0 0 6px 2px rgba(229,57,53,0.8);
+    }
+
+    /* Larger Triangle arrows (20px tall = 10px top + 10px bottom; 20px wide) */
+    .ff-list-arrow {
+      position:absolute;
+      top:50%;
+      transform:translate(-50%,-50%);
+      width:0;
+      height:0;
+      border-top:10px solid transparent;
+      border-bottom:10px solid transparent;
+      border-right:20px solid #2e7d32; /* default “low” */
+      pointer-events:auto;
+      z-index:10;
+    }
+    .ff-list-arrow.med    { border-right-color:#f9a825; }
+    .ff-list-arrow.high   { border-right-color:#c62828; }
+    .ff-list-arrow.wounded {
+      box-shadow:0 0 6px 2px rgba(229,57,53,0.8);
+    }
+
+    /* Tooltip floating in viewport */
+    .ff-tooltip-viewport {
+      position: absolute;
+      background: rgba(0,0,0,0.85);
+      color: #fff;
+      padding: 5px 8px;
+      border-radius: 4px;
+      font-size: 0.85em;
+      line-height: 1.2em;
+      white-space: nowrap;
+      z-index: 30000; /* above everything */
+      pointer-events: none;
+    }
 
     /* Floating action button */
     .ff-fab {
@@ -65,9 +98,10 @@
       width:50px; height:50px; border-radius:25px;
       background:#222; color:#eee; font-size:26px; line-height:50px;
       text-align:center; cursor:pointer; z-index:10000;
-      box-shadow:0 4px 12px rgba(0,0,0,0.4); transition:background .2s;
+      box-shadow:0 4px 12px rgba(0,0,0,0.4);
+      transition:background .2s;
     }
-    .ff-fab:hover {background:#333;}
+    .ff-fab:hover { background:#333; }
 
     /* Modal backdrop */
     .ff-modal-backdrop {
@@ -124,7 +158,7 @@
     }
     .ff-modal .btn-save:hover { background:#66bb6a; }
     .ff-modal .btn-cancel {
-      background:#c62828; color:#fff;
+      background:#c62828; color:#fff; /* red */
     }
     .ff-modal .btn-cancel:hover { background:#e53935; }
     .ff-modal .btn-clear {
@@ -151,51 +185,72 @@
 
   // ---- Base BP calc (pre-gym/drug) ----
   function baseCalc(ps,b) {
-    const elo = ps.elo*2;
-    const dmg = Math.sqrt(ps.attackdamage/1000)*1.5;
-    const win = Math.sqrt(Math.max(ps.attackswon-ps.attackslost,0))*1.2;
-    const wr  = (ps.attackswon+ps.attackslost)>0
-              ? ps.attackswon/(ps.attackswon+ps.attackslost)
+    const elo = ps.elo * 2;
+    const dmg = Math.sqrt(ps.attackdamage/1000) * 1.5;
+    const win = Math.sqrt(Math.max(ps.attackswon - ps.attackslost, 0)) * 1.2;
+    const wr  = (ps.attackswon + ps.attackslost) > 0
+              ? ps.attackswon / (ps.attackswon + ps.attackslost)
               : 0;
-    const cr  = ps.attackhits>0 ? ps.attackcriticalhits/ps.attackhits : 0;
-    const nw  = Math.log10((ps.networth||0)+1)*5;
-    const now = Date.now()/1000;
-    const joined = b&&b.joined? b.joined : now;
-    const age = Math.log10(((now-joined)/86400)+1)*5;
-    const act = Math.log10((ps.useractivity||0)+1)*2;
-    return elo + dmg + win + wr*100 + cr*100 + nw + age + act;
+    const cr  = ps.attackhits > 0
+              ? ps.attackcriticalhits / ps.attackhits
+              : 0;
+    const nw  = Math.log10((ps.networth || 0) + 1) * 5;
+    const now = Date.now() / 1000;
+    const joined = b && b.joined ? b.joined : now;
+    const age = Math.log10(((now - joined) / 86400) + 1) * 5;
+    const act = Math.log10((ps.useractivity || 0) + 1) * 2;
+    return elo + dmg + win + wr * 100 + cr * 100 + nw + age + act;
   }
 
   // ---- Gym multiplier ----
   const gymTiers = [
-    {energy:0,mul:1}, {energy:200,mul:1.2375}, {energy:500,mul:1.45},
-    {energy:1000,mul:1.6}, {energy:2000,mul:1.7}, {energy:2750,mul:1.8},
-    {energy:3000,mul:1.85},{energy:3500,mul:1.85},{energy:4000,mul:2},
-    {energy:6000,mul:2.175},{energy:7000,mul:2.275},{energy:8000,mul:2.425},
-    {energy:11000,mul:2.525},{energy:12420,mul:2.55},{energy:18000,mul:2.7375},
-    {energy:18100,mul:2.785},{energy:24140,mul:3},{energy:31260,mul:3.1},
-    {energy:36610,mul:3.1625},{energy:46640,mul:3.2625},{energy:56520,mul:3.325},
-    {energy:67775,mul:3.2875},{energy:84535,mul:3.35},{energy:106305,mul:3.45},
-    {energy:100000000,mul:3.65}
+    { energy: 0,      mul: 1    },
+    { energy: 200,    mul: 1.2375 },
+    { energy: 500,    mul: 1.45   },
+    { energy: 1000,   mul: 1.6    },
+    { energy: 2000,   mul: 1.7    },
+    { energy: 2750,   mul: 1.8    },
+    { energy: 3000,   mul: 1.85   },
+    { energy: 3500,   mul: 1.85   },
+    { energy: 4000,   mul: 2      },
+    { energy: 6000,   mul: 2.175  },
+    { energy: 7000,   mul: 2.275  },
+    { energy: 8000,   mul: 2.425  },
+    { energy: 11000,  mul: 2.525  },
+    { energy: 12420,  mul: 2.55   },
+    { energy: 18000,  mul: 2.7375 },
+    { energy: 18100,  mul: 2.785  },
+    { energy: 24140,  mul: 3      },
+    { energy: 31260,  mul: 3.1    },
+    { energy: 36610,  mul: 3.1625 },
+    { energy: 46640,  mul: 3.2625 },
+    { energy: 56520,  mul: 3.325  },
+    { energy: 67775,  mul: 3.2875 },
+    { energy: 84535,  mul: 3.35   },
+    { energy: 106305, mul: 3.45   },
+    { energy: 100000000, mul: 3.65 }
   ];
-  function getGymMultiplier(xan){
-    const e = xan*250; let m=1;
-    gymTiers.forEach(t=>{ if(e>=t.energy) m=t.mul; });
+  function getGymMultiplier(xan) {
+    const e = xan * 250;
+    let m = 1;
+    gymTiers.forEach(t => {
+      if (e >= t.energy) m = t.mul;
+    });
     return m;
   }
 
   // ---- User state ----
-  let ME_STATS = null,
-      ME_DRUGS = null,
-      USER_BP = null,
+  let ME_STATS         = null,
+      ME_DRUGS         = null,
+      USER_BP          = null,
       USER_DRUG_DEBUFF = 0;
 
   // fetch our own stats
-  apiGet('/user/?selections=personalstats,basic',  d=>{ ME_STATS=d; initIfReady(); });
-  apiGet('/user/?selections=battlestats',          d=>{ ME_DRUGS=d;   initIfReady(); });
+  apiGet('/user/?selections=personalstats,basic', d => { ME_STATS = d; initIfReady(); });
+  apiGet('/user/?selections=battlestats',       d => { ME_DRUGS = d; initIfReady(); });
 
-  function initIfReady(){
-    if(!ME_STATS||!ME_DRUGS) return;
+  function initIfReady() {
+    if (!ME_STATS || !ME_DRUGS) return;
 
     // compute drug debuff
     const negs = [
@@ -203,54 +258,134 @@
       ME_DRUGS.defense_modifier,
       ME_DRUGS.speed_modifier,
       ME_DRUGS.dexterity_modifier
-    ].filter(x=>x<0).map(x=>-x/100);
+    ].filter(x => x < 0)
+     .map(x => -x / 100);
+
     USER_DRUG_DEBUFF = negs.length
-      ? negs.reduce((a,c)=>a+c,0)/negs.length
+      ? negs.reduce((a, c) => a + c, 0) / negs.length
       : 0;
 
     // compute our BP
     USER_BP = baseCalc(ME_STATS.personalstats, ME_STATS.basic)
-            * getGymMultiplier(ME_STATS.personalstats.xantaken||0)
+            * getGymMultiplier(ME_STATS.personalstats.xantaken || 0)
             * (1 - USER_DRUG_DEBUFF * settings.drugWeight);
 
-    // now kick things off
+    // kick things off
     injectAll();
-    window.addEventListener('popstate',injectAll);
-    new MutationObserver(m=>m.forEach(r=>injectAll()))
-      .observe(document.body,{childList:true,subtree:true});
+    window.addEventListener('popstate', injectAll);
+    new MutationObserver(m => m.forEach(r => injectAll()))
+      .observe(document.body, { childList:true, subtree:true });
   }
 
-  // ---- Injection ----
-  function injectProfile(){
-    const m = location.href.match(/[?&](?:XID|user2ID)=(\d+)/);
-    if(!m||USER_BP===null) return;
+  // ---- Utility: show/hide a single floating tooltip at cursor page coords ----
+  function showTooltipAt(pageX, pageY, html) {
+    let tt = document.querySelector('.ff-tooltip-viewport');
+    if (!tt) {
+      tt = document.createElement('div');
+      tt.className = 'ff-tooltip-viewport';
+      document.body.appendChild(tt);
+    }
+    tt.innerHTML = html;
+    requestAnimationFrame(() => {
+      const rect = tt.getBoundingClientRect();
+      // Center horizontally on pageX:
+      let left = pageX - rect.width / 2;
+      left = Math.max(4, Math.min(left, document.documentElement.clientWidth - rect.width - 4));
+      // Place ~12px above the cursor’s Y
+      const top = pageY - rect.height - 12;
+      tt.style.left = left + 'px';
+      tt.style.top  = top + 'px';
+      tt.style.display = 'block';
+    });
+  }
+  function hideTooltip() {
+    const tt = document.querySelector('.ff-tooltip-viewport');
+    if (tt) tt.style.display = 'none';
+  }
+
+  // ---- Injection: Profile (short last_action.relative) + List (into honorWrap) ----
+  function injectProfile() {
+    // Find the very first <h4> on the page:
     const h = document.querySelector('h4');
-    if(!h||h.dataset.ff) return;
+    if (!h || h.dataset.ff) {
+      return;
+    }
     h.dataset.ff = '1';
 
-    apiGet(`/user/${m[1]}?selections=personalstats,basic,profile`, o=>{
-      const oppBP = baseCalc(o.personalstats,o.basic)
-                  * getGymMultiplier(o.personalstats.xantaken||0),
-            raw   = (USER_BP/oppBP)*100,
-            wp    = 1 - (o.life.current/o.life.maximum||1),
-            fair  = Math.min(raw/100,1),
+    // Extract userId from URL (if present):
+    const m = location.href.match(/[?&](?:XID|user2ID)=(\d+)/);
+    const userId = m ? m[1] : null;
+
+    // If no valid userId, bail early (nothing to show):
+    if (!userId) {
+      return;
+    }
+
+    apiGet(`/user/${userId}?selections=personalstats,basic,profile`, o => {
+      const oppBP = baseCalc(o.personalstats, o.basic)
+                  * getGymMultiplier(o.personalstats.xantaken || 0),
+            raw   = (USER_BP / oppBP) * 100,
+            wp    = 1 - (o.life.current / o.life.maximum || 1),
+            fair  = Math.min(raw / 100, 1),
             boost = wp * settings.lifeWeight * fair,
-            adj   = raw*(1+boost),
+            adj   = raw * (1 + boost),
             pct   = parseFloat(adj.toFixed(2));
 
-      let cls='low', note='Advantage';
-      if(pct < settings.lowHigh)    { cls='high'; note='High risk'; }
-      else if(pct < settings.highMed){ cls='med';  note='Moderate risk'; }
+      let cls  = 'low', note = 'Advantage';
+      if (pct < settings.lowHigh)     { cls = 'high'; note = 'High risk'; }
+      else if (pct < settings.highMed) { cls = 'med';  note = 'Moderate risk'; }
 
+      // Compute Life % (if available)
+      let lifePct = null;
+      if (o.life && typeof o.life.current === 'number' && o.life.maximum) {
+        lifePct = Math.round((o.life.current / o.life.maximum) * 100);
+      }
+
+      // Find any last_action
+      let lastObj = null;
+      if (o.last_action && typeof o.last_action === 'object') {
+        lastObj = o.last_action;
+      } else if (o.profile && o.profile.last_action && typeof o.profile.last_action === 'object') {
+        lastObj = o.profile.last_action;
+      } else if (o.basic && o.basic.last_action && typeof o.basic.last_action === 'object') {
+        lastObj = o.basic.last_action;
+      }
+
+      // Convert “32 minutes ago” → “32m”, “2 hours ago” → “2h”, “5 days ago” → “5d”
+      let rel = null;
+      if (lastObj && typeof lastObj.relative === 'string') {
+        const mm = lastObj.relative.match(/^(\d+)\s+(\w+)/);
+        if (mm) {
+          const num = mm[1];
+          const w   = mm[2].toLowerCase();
+          let suffix = 'm';
+          if      (w.startsWith('hour'))   suffix = 'h';
+          else if (w.startsWith('minute')) suffix = 'm';
+          else if (w.startsWith('second')) suffix = 'm';
+          else if (w.startsWith('day'))    suffix = 'd';
+          rel = num + suffix;
+        }
+      }
+
+      // Build “extra” text: “ (L xx% · A yy)”
+      let extra = '';
+      if (lifePct !== null && rel !== null) {
+        extra = ` (L ${lifePct}% · A ${rel})`;
+      } else if (lifePct !== null) {
+        extra = ` (L ${lifePct}%)`;
+      } else if (rel !== null) {
+        extra = ` (A ${rel})`;
+      }
+
+      // Create the banner and append to <h4>:
       const sp = document.createElement('span');
-      sp.className = `ff-score-badge ${cls}` + (wp>0?' wounded':'');
-
+      sp.className = `ff-score-badge ${cls}` + (wp > 0 ? ' wounded' : '');
       sp.innerHTML = `
-        RSI ${pct}% — ${note}
-        ${wp>0 ? `<span style="margin-left:6px; color:#fff;">✚</span>` : ''}
-        ${USER_DRUG_DEBUFF>0
+        RSI ${pct}% — ${note}${extra}
+        ${wp > 0 ? `<span style="margin-left:6px; color:#fff;">✚</span>` : ''}
+        ${USER_DRUG_DEBUFF > 0
           ? `<img src="https://raw.githubusercontent.com/infodump01/LE-Scouter/main/pill-icon-2048x2048.png"
-                  style="width:12px;height:12px;vertical-align:middle;margin-left:6px;">`
+                style="width:12px;height:12px;vertical-align:middle;margin-left:6px;">`
           : ''
         }
       `;
@@ -258,44 +393,111 @@
     });
   }
 
-  function injectList(root=document){
+  function injectList(root = document) {
     injectProfile();
-    root.querySelectorAll('a[href*="profiles.php?XID="]').forEach(a=>{
-      const n = a.closest('tr,li,div,td')||a.parentNode;
-      if(n.dataset.ff) return;
-      n.dataset.ff = '1';
-      n.style.position = 'relative';
 
-      apiGet(`/user/${a.href.match(/XID=(\d+)/)[1]}?selections=personalstats,basic,profile`, d=>{
-        const oppBP = baseCalc(d.personalstats,d.basic)
-                    * getGymMultiplier(d.personalstats.xantaken||0),
-              raw   = (USER_BP/oppBP)*100,
-              wp    = 1 - (d.life.current/d.life.maximum||1),
-              fair  = Math.min(raw/100,1),
+    // On list/faction pages: for each <a href="profiles.php?XID=">…</a>, insert a tooltip‐enabled arrow in its honorWrap
+    root.querySelectorAll('a[href*="profiles.php?XID="]').forEach(a => {
+      // 1) Find the nearest honorWrap container
+      const honorWrap = a.closest('div[class*="honorWrap"]');
+      if (!honorWrap || honorWrap.dataset.ff) return;
+      honorWrap.dataset.ff = '1';
+
+      // Enforce position:relative
+      const computed = window.getComputedStyle(honorWrap);
+      if (computed.position === 'static') {
+        honorWrap.style.position = 'relative';
+      }
+
+      // 2) Extract the user ID from the link
+      const userIdMatch = a.href.match(/XID=(\d+)/);
+      if (!userIdMatch) return;
+      const userId = userIdMatch[1];
+
+      apiGet(`/user/${userId}?selections=personalstats,basic,profile`, d => {
+        const oppBP = baseCalc(d.personalstats, d.basic)
+                    * getGymMultiplier(d.personalstats.xantaken || 0),
+              raw   = (USER_BP / oppBP) * 100,
+              wp    = 1 - (d.life.current / d.life.maximum || 1),
+              fair  = Math.min(raw / 100, 1),
               boost = wp * settings.lifeWeight * fair,
-              adj   = raw*(1+boost),
+              adj   = raw * (1 + boost),
               cls   = adj < settings.lowHigh ? 'high'
                     : adj < settings.highMed ? 'med'
                     : 'low',
-              pos   = (100 - Math.min(adj,200)/200*100) + '%';
+              pct   = parseFloat(adj.toFixed(2));
+
+        // Horizontal position (as a percentage)
+        const pos = (100 - Math.min(adj, 200) / 200 * 100) + '%';
+
+        // Compute Life % if available
+        let lifePct = null;
+        if (d.life && typeof d.life.current === 'number' && d.life.maximum) {
+          lifePct = Math.round((d.life.current / d.life.maximum) * 100);
+        }
+
+        // Find last_action (unshortened)
+        let lastObj = null;
+        if (d.last_action && typeof d.last_action === 'object') {
+          lastObj = d.last_action;
+        } else if (d.profile && d.profile.last_action && typeof d.profile.last_action === 'object') {
+          lastObj = d.profile.last_action;
+        } else if (d.basic && d.basic.last_action && typeof d.basic.last_action === 'object') {
+          lastObj = d.basic.last_action;
+        }
+
+        // Build tooltip HTML:
+        let tooltipHtml = `RSI: ${pct.toFixed(2)}%`;
+        if (lifePct !== null) {
+          tooltipHtml += `<br>Life: ${lifePct}%`;
+        }
+        if (lastObj && typeof lastObj.relative === 'string') {
+          tooltipHtml += `<br>Last action: ${lastObj.relative}`;
+        }
+
+        // 3) Create the larger arrow element inside honorWrap
+        const wrapper = document.createElement('div');
+        wrapper.style.position = 'absolute';
+        wrapper.style.top      = '50%';
+        wrapper.style.transform= 'translate(-50%,-50%)';
+        wrapper.style.left     = pos;
+        wrapper.style.zIndex   = '10';
 
         const el = document.createElement('span');
-        el.className = `ff-list-arrow ${cls}` + (wp>0?' wounded':'');
-        el.style.left = pos;
-        n.appendChild(el);
+        el.className = `ff-list-arrow ${cls}` + (wp > 0 ? ' wounded' : '');
+
+        // 4) Attach cursor‐anchored tooltip handlers
+        el.addEventListener('mouseenter', e => {
+          showTooltipAt(e.pageX, e.pageY, tooltipHtml);
+        });
+        el.addEventListener('mousemove', e => {
+          showTooltipAt(e.pageX, e.pageY, tooltipHtml);
+        });
+        el.addEventListener('mouseleave', () => {
+          hideTooltip();
+        });
+        // On mobile tap: show for 2s
+        el.addEventListener('click', e => {
+          e.preventDefault();
+          showTooltipAt(e.pageX, e.pageY, tooltipHtml);
+          setTimeout(hideTooltip, 2000);
+        });
+
+        wrapper.appendChild(el);
+        honorWrap.appendChild(wrapper);
       });
     });
   }
 
-  function injectAll(){
+  function injectAll() {
     injectList();
   }
 
-  // ---- Build GUI ----
+  // ---- Build GUI (Cancel remains red) ----
   const fab      = document.createElement('div'),
         backdrop = document.createElement('div'),
         modal    = document.createElement('div');
-  fab.className      = 'ff-fab'; fab.textContent='⚙️';
+  fab.className      = 'ff-fab'; fab.textContent = '⚙️';
   backdrop.className = 'ff-modal-backdrop';
   modal.className    = 'ff-modal';
   document.body.append(fab, backdrop, modal);
@@ -328,33 +530,34 @@
   `;
 
   // Tab switching
-  modal.querySelectorAll('.ff-tab').forEach(tab=>{
-    tab.onclick = ()=>{
-      modal.querySelectorAll('.ff-tab, .ff-tab-content').forEach(el=>el.classList.remove('active'));
+  modal.querySelectorAll('.ff-tab').forEach(tab => {
+    tab.onclick = () => {
+      modal.querySelectorAll('.ff-tab, .ff-tab-content')
+           .forEach(el => el.classList.remove('active'));
       tab.classList.add('active');
-      modal.querySelector('#tab-'+tab.dataset.tab).classList.add('active');
+      modal.querySelector('#tab-' + tab.dataset.tab).classList.add('active');
     };
   });
 
-  // Open/close
-  fab.onclick = ()=>{ backdrop.style.display='block'; modal.style.display='block'; };
+  // Open/close modal
+  fab.onclick = () => { backdrop.style.display = 'block'; modal.style.display = 'block'; };
   backdrop.onclick = closeModal;
   modal.querySelector('#ff-cancel').onclick = closeModal;
-  function closeModal(){
-    modal.style.display='none';
-    backdrop.style.display='none';
+  function closeModal() {
+    modal.style.display = 'none';
+    backdrop.style.display = 'none';
   }
 
   // Clear Key
-  modal.querySelector('#ff-clear-key').onclick = ()=>{
+  modal.querySelector('#ff-clear-key').onclick = () => {
     rD_deleteValue('api_key');
     API_KEY = '';
     modal.querySelector('#ff-key').value = '';
     alert('API key cleared');
   };
 
-  // Save & reload
-  modal.querySelector('#ff-save').onclick = ()=>{
+  // Save & Reload
+  modal.querySelector('#ff-save').onclick = () => {
     const nk = modal.querySelector('#ff-key').value.trim();
     if (nk) rD_setValue('api_key', nk), API_KEY = nk;
     const v1 = +modal.querySelector('#ff-th1').value,
@@ -368,9 +571,15 @@
     location.reload();
   };
 
-  // Auto-open API tab first run
-  if(!API_KEY){
+  // Auto-open API tab if no key
+  if (!API_KEY) {
     fab.click();
     modal.querySelector('[data-tab=apikey]').click();
   }
+
+  // Kick off initial injection & observe for AJAX navigation
+  injectAll();
+  window.addEventListener('popstate', injectAll);
+  new MutationObserver(m => m.forEach(r => injectAll()))
+    .observe(document.body, { childList:true, subtree:true });
 })();
