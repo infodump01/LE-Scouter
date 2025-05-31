@@ -1,6 +1,6 @@
 # LE Scouter
 
-**Version:** v1.2.1
+**Version:** v1.2.2
 
 A lightweight userscript that overlays *Relative Strength Index* (RSI) risk indicators across Torn City web interfaces (desktop via Tampermonkey and mobile via Torn PDA). It calculates and displays a risk score for opponents based on battle power estimates, gym-tier multipliers, Xanax use, and current life.
 
