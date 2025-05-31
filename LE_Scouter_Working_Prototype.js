@@ -5,8 +5,8 @@
 // @match        https://pda.torn.com/*
 // @version      1.2.2
 // @description  Two-tab dark GUI; injured+drug indicators; on profiles show Life% & “Last action” (shortened); on list pages inject larger 20×20px RSI arrows with cursor tooltips—always inject banner under the first <h4>, exactly like v1.2.1 did on PDA.
-// @updateURL    https://raw.githubusercontent.com/infodump01/LE-Scouter/main/LE_Scouter_v1.2.1_life_action_relative_tooltips_larger_plainh4.js
-// @downloadURL  https://raw.githubusercontent.com/infodump01/LE-Scouter/main/LE_Scouter_v1.2.1_life_action_relative_tooltips_larger_plainh4.js
+// @updateURL    https://raw.githubusercontent.com/infodump01/LE-Scouter/main/LE_Scouter_Working_Prototype.js
+// @downloadURL  https://raw.githubusercontent.com/infodump01/LE-Scouter/main/LE_Scouter_Working_Prototype.js
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
 // @grant        GM_setValue
