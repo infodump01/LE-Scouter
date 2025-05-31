@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         LE Scouter Base v1.2.1 + Life% & Last Action + Cursor-Anchored Tooltip Arrows
+// @name         LE Scouter Base v1.2.1 + Life% & Last Action + Tooltips
 // @namespace    Violentmonkey Scripts
 // @match        https://www.torn.com/*
 // @version      1.2.1-life-action-relative-tooltips-cursoranchor-fixed
