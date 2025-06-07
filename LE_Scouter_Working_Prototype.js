@@ -1,10 +1,10 @@
 // ==UserScript==
-// @name         LE Scouter Base v1.2.2
+// @name         LE Scouter Base v1.2.3
 // @namespace    Violentmonkey Scripts
 // @match        https://www.torn.com/*
 // @match        https://pda.torn.com/*
-// @version      1.2.2
-// @description  Two-tab dark GUI; injured+drug indicators; on profiles show Life% & “Last action” (shortened); on list pages inject larger 20×20px RSI arrows with cursor tooltips—always inject banner under the first <h4>, exactly like v1.2.1 did on PDA.
+// @version      1.2.3
+// @description  RSI arrow and live-updating plane icon (blue/orange) for travel status; custom tooltip only (never double); RSI banner restored for profile pages
 // @updateURL    https://raw.githubusercontent.com/infodump01/LE-Scouter/main/LE_Scouter_Working_Prototype.js
 // @downloadURL  https://raw.githubusercontent.com/infodump01/LE-Scouter/main/LE_Scouter_Working_Prototype.js
 // @grant        GM_xmlhttpRequest
@@ -14,7 +14,14 @@
 // @grant        GM_deleteValue
 // @connect      api.torn.com
 // ==/UserScript==
+
 (() => {
+  const GREEN_ARROW_UP  = "data:image/svg+xml;utf8,<svg width='20' height='20' xmlns='http://www.w3.org/2000/svg'><polygon points='10,3 19,17 1,17' fill='%232e7d32'/></svg>";
+  const YELLOW_ARROW_UP = "data:image/svg+xml;utf8,<svg width='20' height='20' xmlns='http://www.w3.org/2000/svg'><polygon points='10,3 19,17 1,17' fill='%23f9a825'/></svg>";
+  const RED_ARROW_UP    = "data:image/svg+xml;utf8,<svg width='20' height='20' xmlns='http://www.w3.org/2000/svg'><polygon points='10,3 19,17 1,17' fill='%23c62828'/></svg>";
+
+  const PLANE_ICON_URL = 'https://raw.githubusercontent.com/infodump01/LE-Scouter/main/airport-xxl.png';
+
   // ---- Environment Adapter ----
   if (typeof PDA_httpGet === 'function') {
     window.rD_xmlhttpRequest = d =>
@@ -31,7 +38,6 @@
     window.rD_deleteValue    = GM_deleteValue;
   }
 
-  // ---- Config & Defaults ----
   let API_KEY = rD_getValue('api_key','');
   const defaults = { lowHigh:100, highMed:120, lifeWeight:0.1, drugWeight:0.1 };
   const settings = {
@@ -41,9 +47,8 @@
     drugWeight: +rD_getValue('drugWeight', defaults.drugWeight)
   };
 
-  // ---- Styles (larger 20×20 arrow; enable pointer-events; tooltip; red Cancel button) ----
+  // ---- Styles ----
   GM_addStyle(`
-    /* Score badges */
     .ff-score-badge {
       display:inline-block;
       margin-left:8px;
@@ -58,27 +63,26 @@
     .ff-score-badge.wounded {
       box-shadow:0 0 6px 2px rgba(229,57,53,0.8);
     }
-
-    /* Larger Triangle arrows (20px tall = 10px top + 10px bottom; 20px wide) */
-    .ff-list-arrow {
-      position:absolute;
-      top:50%;
-      transform:translate(-50%,-50%);
-      width:0;
-      height:0;
-      border-top:10px solid transparent;
-      border-bottom:10px solid transparent;
-      border-right:20px solid #2e7d32; /* default “low” */
-      pointer-events:auto;
-      z-index:10;
+    div[class*="honorWrap"] { overflow: visible !important; position: relative !important; }
+    .honor-text-wrap { position: relative !important; }
+    .ff-list-arrow-img {
+      position: absolute;
+      bottom: 0;
+      left: 50%;
+      width: 20px !important;
+      height: 20px !important;
+      max-width: 20px !important;
+      max-height: 20px !important;
+      pointer-events: auto;
+      z-index: 10000;
+      transform: translate(-50%, 38%);
+      display: block;
+      transition: box-shadow .15s;
     }
-    .ff-list-arrow.med    { border-right-color:#f9a825; }
-    .ff-list-arrow.high   { border-right-color:#c62828; }
-    .ff-list-arrow.wounded {
-      box-shadow:0 0 6px 2px rgba(229,57,53,0.8);
+    .ff-list-arrow-img.wounded {
+      box-shadow: 0 0 10px 4px #c62828, 0 0 2px 2px #fff2;
+      border-radius: 5px;
     }
-
-    /* Tooltip floating in viewport */
     .ff-tooltip-viewport {
       position: absolute;
       background: rgba(0,0,0,0.85);
@@ -88,11 +92,9 @@
       font-size: 0.85em;
       line-height: 1.2em;
       white-space: nowrap;
-      z-index: 30000; /* above everything */
+      z-index: 2147483647 !important;
       pointer-events: none;
     }
-
-    /* Floating action button */
     .ff-fab {
       position:fixed; bottom:20px; left:20px;
       width:50px; height:50px; border-radius:25px;
@@ -102,16 +104,12 @@
       transition:background .2s;
     }
     .ff-fab:hover { background:#333; }
-
-    /* Modal backdrop */
     .ff-modal-backdrop {
       position:fixed; inset:0; background:rgba(0,0,0,0.7);
       z-index:9998; display:none;
     }
-
-    /* Modal window */
     .ff-modal {
-      position:fixed; top:50%; left:50%; transform:translate(-50%,-50%);
+      position:fixed; top:50%; left:50%; transform:translate(-50%, -50%);
       background:#2b2b2b; color:#eee; padding:20px; border-radius:8px;
       z-index:9999; min-width:360px; display:none;
       box-shadow:0 8px 24px rgba(0,0,0,0.6);
@@ -121,8 +119,6 @@
       margin:0 0 12px; font-size:1.3em; display:flex; align-items:center;
     }
     .ff-modal h3::before { content:"🛠️"; margin-right:8px; }
-
-    /* Tabs */
     .ff-tabs { display:flex; margin-bottom:12px; }
     .ff-tab {
       flex:1; padding:8px; text-align:center; cursor:pointer;
@@ -132,12 +128,8 @@
     .ff-tab.active {
       color:#fff; border-color:#fff;
     }
-
-    /* Tab content */
     .ff-tab-content { display:none; }
     .ff-tab-content.active { display:block; }
-
-    /* Form fields */
     .ff-modal label {
       display:block; margin:12px 0 4px; font-size:0.9em; color:#ccc;
     }
@@ -146,8 +138,6 @@
       border-radius:4px; background:#333; color:#eee;
       font-size:1em;
     }
-
-    /* Buttons */
     .ff-modal .btn {
       display:inline-block; margin-top:16px; padding:8px 14px;
       border:none; border-radius:4px; font-size:0.95em;
@@ -158,16 +148,38 @@
     }
     .ff-modal .btn-save:hover { background:#66bb6a; }
     .ff-modal .btn-cancel {
-      background:#c62828; color:#fff; /* red */
+      background:#c62828; color:#fff;
     }
     .ff-modal .btn-cancel:hover { background:#e53935; }
     .ff-modal .btn-clear {
       background:#555; color:#fff; margin-left:8px;
     }
     .ff-modal .btn-clear:hover { background:#666; }
+    .ff-travel-icon {
+      position: absolute;
+      right: 4px;
+      bottom: 2px;
+      height: 20px !important;
+      width: 20px !important;
+      max-width: 20px !important;
+      max-height: 20px !important;
+      z-index: 2147483646 !important;
+      filter: grayscale(1) brightness(0.7);
+      opacity: 0.92;
+      pointer-events: auto;
+      transition: filter 0.15s, box-shadow 0.15s;
+    }
+    .ff-travel-icon.ff-traveling {
+      filter: grayscale(0) brightness(1) drop-shadow(0 0 3px #2094fa) drop-shadow(0 0 2px #42a5f5);
+    }
+    .ff-travel-icon.ff-abroad {
+      filter: grayscale(0) brightness(1) drop-shadow(0 0 3px #ff9800) drop-shadow(0 0 2px #ffb300);
+    }
+    .ff-travel-icon:hover {
+      filter: brightness(1.4) !important;
+    }
   `);
 
-  // ---- API GET helper ----
   function apiGet(ep, cb) {
     if (!API_KEY) return;
     rD_xmlhttpRequest({
@@ -183,7 +195,6 @@
     });
   }
 
-  // ---- Base BP calc (pre-gym/drug) ----
   function baseCalc(ps,b) {
     const elo = ps.elo * 2;
     const dmg = Math.sqrt(ps.attackdamage/1000) * 1.5;
@@ -202,7 +213,6 @@
     return elo + dmg + win + wr * 100 + cr * 100 + nw + age + act;
   }
 
-  // ---- Gym multiplier ----
   const gymTiers = [
     { energy: 0,      mul: 1    },
     { energy: 200,    mul: 1.2375 },
@@ -239,20 +249,16 @@
     return m;
   }
 
-  // ---- User state ----
   let ME_STATS         = null,
       ME_DRUGS         = null,
       USER_BP          = null,
       USER_DRUG_DEBUFF = 0;
 
-  // fetch our own stats
   apiGet('/user/?selections=personalstats,basic', d => { ME_STATS = d; initIfReady(); });
   apiGet('/user/?selections=battlestats',       d => { ME_DRUGS = d; initIfReady(); });
 
   function initIfReady() {
     if (!ME_STATS || !ME_DRUGS) return;
-
-    // compute drug debuff
     const negs = [
       ME_DRUGS.strength_modifier,
       ME_DRUGS.defense_modifier,
@@ -265,19 +271,16 @@
       ? negs.reduce((a, c) => a + c, 0) / negs.length
       : 0;
 
-    // compute our BP
     USER_BP = baseCalc(ME_STATS.personalstats, ME_STATS.basic)
             * getGymMultiplier(ME_STATS.personalstats.xantaken || 0)
             * (1 - USER_DRUG_DEBUFF * settings.drugWeight);
 
-    // kick things off
     injectAll();
     window.addEventListener('popstate', injectAll);
     new MutationObserver(m => m.forEach(r => injectAll()))
       .observe(document.body, { childList:true, subtree:true });
   }
 
-  // ---- Utility: show/hide a single floating tooltip at cursor page coords ----
   function showTooltipAt(pageX, pageY, html) {
     let tt = document.querySelector('.ff-tooltip-viewport');
     if (!tt) {
@@ -288,10 +291,8 @@
     tt.innerHTML = html;
     requestAnimationFrame(() => {
       const rect = tt.getBoundingClientRect();
-      // Center horizontally on pageX:
       let left = pageX - rect.width / 2;
       left = Math.max(4, Math.min(left, document.documentElement.clientWidth - rect.width - 4));
-      // Place ~12px above the cursor’s Y
       const top = pageY - rect.height - 12;
       tt.style.left = left + 'px';
       tt.style.top  = top + 'px';
@@ -303,20 +304,14 @@
     if (tt) tt.style.display = 'none';
   }
 
-  // ---- Injection: Profile (short last_action.relative) + List (into honorWrap) ----
   function injectProfile() {
-    // Find the very first <h4> on the page:
     const h = document.querySelector('h4');
     if (!h || h.dataset.ff) {
       return;
     }
     h.dataset.ff = '1';
-
-    // Extract userId from URL (if present):
     const m = location.href.match(/[?&](?:XID|user2ID)=(\d+)/);
     const userId = m ? m[1] : null;
-
-    // If no valid userId, bail early (nothing to show):
     if (!userId) {
       return;
     }
@@ -334,14 +329,10 @@
       let cls  = 'low', note = 'Advantage';
       if (pct < settings.lowHigh)     { cls = 'high'; note = 'High risk'; }
       else if (pct < settings.highMed) { cls = 'med';  note = 'Moderate risk'; }
-
-      // Compute Life % (if available)
       let lifePct = null;
       if (o.life && typeof o.life.current === 'number' && o.life.maximum) {
         lifePct = Math.round((o.life.current / o.life.maximum) * 100);
       }
-
-      // Find any last_action
       let lastObj = null;
       if (o.last_action && typeof o.last_action === 'object') {
         lastObj = o.last_action;
@@ -350,8 +341,6 @@
       } else if (o.basic && o.basic.last_action && typeof o.basic.last_action === 'object') {
         lastObj = o.basic.last_action;
       }
-
-      // Convert “32 minutes ago” → “32m”, “2 hours ago” → “2h”, “5 days ago” → “5d”
       let rel = null;
       if (lastObj && typeof lastObj.relative === 'string') {
         const mm = lastObj.relative.match(/^(\d+)\s+(\w+)/);
@@ -366,8 +355,6 @@
           rel = num + suffix;
         }
       }
-
-      // Build “extra” text: “ (L xx% · A yy)”
       let extra = '';
       if (lifePct !== null && rel !== null) {
         extra = ` (L ${lifePct}% · A ${rel})`;
@@ -376,8 +363,6 @@
       } else if (rel !== null) {
         extra = ` (A ${rel})`;
       }
-
-      // Create the banner and append to <h4>:
       const sp = document.createElement('span');
       sp.className = `ff-score-badge ${cls}` + (wp > 0 ? ' wounded' : '');
       sp.innerHTML = `
@@ -395,26 +380,23 @@
 
   function injectList(root = document) {
     injectProfile();
-
-    // On list/faction pages: for each <a href="profiles.php?XID=">…</a>, insert a tooltip‐enabled arrow in its honorWrap
     root.querySelectorAll('a[href*="profiles.php?XID="]').forEach(a => {
-      // 1) Find the nearest honorWrap container
       const honorWrap = a.closest('div[class*="honorWrap"]');
       if (!honorWrap || honorWrap.dataset.ff) return;
       honorWrap.dataset.ff = '1';
-
-      // Enforce position:relative
-      const computed = window.getComputedStyle(honorWrap);
+      const honorTextWrap = honorWrap.querySelector('.honor-text-wrap') || honorWrap;
+      const computed = window.getComputedStyle(honorTextWrap);
       if (computed.position === 'static') {
-        honorWrap.style.position = 'relative';
+        honorTextWrap.style.position = 'relative';
       }
-
-      // 2) Extract the user ID from the link
       const userIdMatch = a.href.match(/XID=(\d+)/);
       if (!userIdMatch) return;
       const userId = userIdMatch[1];
-
       apiGet(`/user/${userId}?selections=personalstats,basic,profile`, d => {
+        // Remove any existing triangle/plane
+        Array.from(honorTextWrap.querySelectorAll('.ff-list-arrow-img, .ff-travel-icon')).forEach(el => el.remove());
+
+        // TRIANGLE ARROW as before:
         const oppBP = baseCalc(d.personalstats, d.basic)
                     * getGymMultiplier(d.personalstats.xantaken || 0),
               raw   = (USER_BP / oppBP) * 100,
@@ -426,17 +408,11 @@
                     : adj < settings.highMed ? 'med'
                     : 'low',
               pct   = parseFloat(adj.toFixed(2));
-
-        // Horizontal position (as a percentage)
         const pos = (100 - Math.min(adj, 200) / 200 * 100) + '%';
-
-        // Compute Life % if available
         let lifePct = null;
         if (d.life && typeof d.life.current === 'number' && d.life.maximum) {
           lifePct = Math.round((d.life.current / d.life.maximum) * 100);
         }
-
-        // Find last_action (unshortened)
         let lastObj = null;
         if (d.last_action && typeof d.last_action === 'object') {
           lastObj = d.last_action;
@@ -445,8 +421,6 @@
         } else if (d.basic && d.basic.last_action && typeof d.basic.last_action === 'object') {
           lastObj = d.basic.last_action;
         }
-
-        // Build tooltip HTML:
         let tooltipHtml = `RSI: ${pct.toFixed(2)}%`;
         if (lifePct !== null) {
           tooltipHtml += `<br>Life: ${lifePct}%`;
@@ -454,46 +428,138 @@
         if (lastObj && typeof lastObj.relative === 'string') {
           tooltipHtml += `<br>Last action: ${lastObj.relative}`;
         }
-
-        // 3) Create the larger arrow element inside honorWrap
-        const wrapper = document.createElement('div');
-        wrapper.style.position = 'absolute';
-        wrapper.style.top      = '50%';
-        wrapper.style.transform= 'translate(-50%,-50%)';
-        wrapper.style.left     = pos;
-        wrapper.style.zIndex   = '10';
-
-        const el = document.createElement('span');
-        el.className = `ff-list-arrow ${cls}` + (wp > 0 ? ' wounded' : '');
-
-        // 4) Attach cursor‐anchored tooltip handlers
-        el.addEventListener('mouseenter', e => {
-          showTooltipAt(e.pageX, e.pageY, tooltipHtml);
+        const img = document.createElement('img');
+        img.className = 'ff-list-arrow-img';
+        img.style.left = pos;
+        img.src = cls === 'low' ? GREEN_ARROW_UP : cls === 'med' ? YELLOW_ARROW_UP : RED_ARROW_UP;
+        img.setAttribute('width', '20');
+        img.setAttribute('height', '20');
+        img.style.width = "20px";
+        img.style.height = "20px";
+        img.style.maxWidth = "20px";
+        img.style.maxHeight = "20px";
+        if (wp > 0) img.classList.add('wounded');
+        // Tooltip on hover/tap (always up to date: refresh just this triangle)
+        img.addEventListener('mouseenter', e => {
+          apiGet(`/user/${userId}?selections=personalstats,basic,profile`, d2 => {
+            Array.from(honorTextWrap.querySelectorAll('.ff-list-arrow-img')).forEach(el => el.remove());
+            injectOneTriangle(honorTextWrap, d2, userId, e);
+          });
         });
-        el.addEventListener('mousemove', e => {
-          showTooltipAt(e.pageX, e.pageY, tooltipHtml);
-        });
-        el.addEventListener('mouseleave', () => {
-          hideTooltip();
-        });
-        // On mobile tap: show for 2s
-        el.addEventListener('click', e => {
+        img.addEventListener('mousemove', e => { showTooltipAt(e.pageX, e.pageY, tooltipHtml); });
+        img.addEventListener('mouseleave', () => { hideTooltip(); });
+        img.addEventListener('click', e => {
           e.preventDefault();
-          showTooltipAt(e.pageX, e.pageY, tooltipHtml);
+          apiGet(`/user/${userId}?selections=personalstats,basic,profile`, d2 => {
+            Array.from(honorTextWrap.querySelectorAll('.ff-list-arrow-img')).forEach(el => el.remove());
+            injectOneTriangle(honorTextWrap, d2, userId, e);
+          });
           setTimeout(hideTooltip, 2000);
         });
+        honorTextWrap.appendChild(img);
 
-        wrapper.appendChild(el);
-        honorWrap.appendChild(wrapper);
+        // PLANE ICON if Traveling/Abroad, with live update:
+        function addPlaneIcon(statusData, triggerEvt) {
+          // Remove old icons
+          Array.from(honorTextWrap.querySelectorAll('.ff-travel-icon')).forEach(el => el.remove());
+          if (statusData.status && (statusData.status.state === "Traveling" || statusData.status.state === "Abroad")) {
+            const plane = document.createElement('img');
+            plane.src = PLANE_ICON_URL;
+            plane.className = 'ff-travel-icon' + (statusData.status.state === "Traveling"
+              ? ' ff-traveling'
+              : ' ff-abroad');
+            // No .title set here!
+            plane.alt = statusData.status.state;
+            plane.setAttribute('draggable', 'false');
+
+            const updatePlaneStatus = (ev) => {
+              apiGet(`/user/${userId}?selections=basic`, newStatus => {
+                addPlaneIcon(newStatus, ev);
+                if (newStatus.status && (newStatus.status.state === "Traveling" || newStatus.status.state === "Abroad")) {
+                  showTooltipAt(ev.pageX, ev.pageY, newStatus.status.description || newStatus.status.state);
+                } else {
+                  hideTooltip();
+                }
+              });
+            };
+
+            plane.addEventListener('mouseenter', updatePlaneStatus);
+            plane.addEventListener('mousemove', function(ev2){
+              showTooltipAt(ev2.pageX, ev2.pageY, statusData.status.description || statusData.status.state);
+            });
+            plane.addEventListener('mouseleave', hideTooltip);
+            plane.addEventListener('click', function(ev) {
+              ev.preventDefault();
+              ev.stopPropagation();
+              updatePlaneStatus(ev);
+            });
+            honorTextWrap.appendChild(plane);
+            if (triggerEvt && triggerEvt.pageX) showTooltipAt(triggerEvt.pageX, triggerEvt.pageY, statusData.status.description || statusData.status.state);
+          } else {
+            hideTooltip();
+          }
+        }
+        apiGet(`/user/${userId}?selections=basic`, statusData => addPlaneIcon(statusData));
       });
     });
+  }
+
+  function injectOneTriangle(honorTextWrap, d, userId, e) {
+    const oppBP = baseCalc(d.personalstats, d.basic)
+                * getGymMultiplier(d.personalstats.xantaken || 0),
+          raw   = (USER_BP / oppBP) * 100,
+          wp    = 1 - (d.life.current / d.life.maximum || 1),
+          fair  = Math.min(raw / 100, 1),
+          boost = wp * settings.lifeWeight * fair,
+          adj   = raw * (1 + boost),
+          cls   = adj < settings.lowHigh ? 'high'
+                : adj < settings.highMed ? 'med'
+                : 'low',
+          pct   = parseFloat(adj.toFixed(2));
+    const pos = (100 - Math.min(adj, 200) / 200 * 100) + '%';
+    let lifePct = null;
+    if (d.life && typeof d.life.current === 'number' && d.life.maximum) {
+      lifePct = Math.round((d.life.current / d.life.maximum) * 100);
+    }
+    let lastObj = null;
+    if (d.last_action && typeof d.last_action === 'object') {
+      lastObj = d.last_action;
+    } else if (d.profile && d.profile.last_action && typeof d.profile.last_action === 'object') {
+      lastObj = d.profile.last_action;
+    } else if (d.basic && d.basic.last_action && typeof d.basic.last_action === 'object') {
+      lastObj = d.basic.last_action;
+    }
+    let tooltipHtml = `RSI: ${pct.toFixed(2)}%`;
+    if (lifePct !== null) tooltipHtml += `<br>Life: ${lifePct}%`;
+    if (lastObj && typeof lastObj.relative === 'string') tooltipHtml += `<br>Last action: ${lastObj.relative}`;
+    const img = document.createElement('img');
+    img.className = 'ff-list-arrow-img';
+    img.style.left = pos;
+    img.src = cls === 'low' ? GREEN_ARROW_UP : cls === 'med' ? YELLOW_ARROW_UP : RED_ARROW_UP;
+    img.setAttribute('width', '20');
+    img.setAttribute('height', '20');
+    img.style.width = "20px";
+    img.style.height = "20px";
+    img.style.maxWidth = "20px";
+    img.style.maxHeight = "20px";
+    if (wp > 0) img.classList.add('wounded');
+    img.addEventListener('mouseenter', ee => { showTooltipAt(ee.pageX, ee.pageY, tooltipHtml); });
+    img.addEventListener('mousemove', ee => { showTooltipAt(ee.pageX, ee.pageY, tooltipHtml); });
+    img.addEventListener('mouseleave', hideTooltip);
+    img.addEventListener('click', ee => {
+      ee.preventDefault();
+      showTooltipAt(ee.pageX, ee.pageY, tooltipHtml);
+      setTimeout(hideTooltip, 2000);
+    });
+    honorTextWrap.appendChild(img);
+    if (e && e.pageX) showTooltipAt(e.pageX, e.pageY, tooltipHtml);
   }
 
   function injectAll() {
     injectList();
   }
 
-  // ---- Build GUI (Cancel remains red) ----
+  // ---- GUI ----
   const fab      = document.createElement('div'),
         backdrop = document.createElement('div'),
         modal    = document.createElement('div');
@@ -529,7 +595,6 @@
     </div>
   `;
 
-  // Tab switching
   modal.querySelectorAll('.ff-tab').forEach(tab => {
     tab.onclick = () => {
       modal.querySelectorAll('.ff-tab, .ff-tab-content')
@@ -539,7 +604,6 @@
     };
   });
 
-  // Open/close modal
   fab.onclick = () => { backdrop.style.display = 'block'; modal.style.display = 'block'; };
   backdrop.onclick = closeModal;
   modal.querySelector('#ff-cancel').onclick = closeModal;
@@ -547,16 +611,12 @@
     modal.style.display = 'none';
     backdrop.style.display = 'none';
   }
-
-  // Clear Key
   modal.querySelector('#ff-clear-key').onclick = () => {
     rD_deleteValue('api_key');
     API_KEY = '';
     modal.querySelector('#ff-key').value = '';
     alert('API key cleared');
   };
-
-  // Save & Reload
   modal.querySelector('#ff-save').onclick = () => {
     const nk = modal.querySelector('#ff-key').value.trim();
     if (nk) rD_setValue('api_key', nk), API_KEY = nk;
@@ -570,14 +630,10 @@
     if (!isNaN(v4)) rD_setValue('drugWeight', v4);
     location.reload();
   };
-
-  // Auto-open API tab if no key
   if (!API_KEY) {
     fab.click();
     modal.querySelector('[data-tab=apikey]').click();
   }
-
-  // Kick off initial injection & observe for AJAX navigation
   injectAll();
   window.addEventListener('popstate', injectAll);
   new MutationObserver(m => m.forEach(r => injectAll()))
