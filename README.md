@@ -1,113 +1,173 @@
-# LE Scouter
-
-**Version:** v1.2.4
-
-A lightweight userscript that overlays *Relative Strength Index* (RSI) risk indicators across Torn City web interfaces (desktop via Tampermonkey and mobile via Torn PDA). It calculates and displays a risk score for opponents based on battle power estimates, gym-tier multipliers, Xanax use, and current life.
-
-## Features
-
-* **Cross-Platform**: Works on both desktop browsers (Tampermonkey/Greasemonkey) and the Torn PDA mobile app.
-* **RSI Badge**: Displays a colored badge on individual profile pages showing:
-
-  * RSI % (user vs. opponent battle power)
-  * Risk category: **High**, **Moderate**, or **Advantage**.
-  * Medical indicator (✚) if the opponent is wounded (life < max).
-* **Faction & List Arrows**: Overlays colored arrows on any page listing profiles (faction pages, market, message boards, etc.) pointing across the avatar/badge area:
-
-  * Position reflects RSI% (0% on right, up to 200% on left).
-  * Arrow color indicates risk category.
-  * Wounded opponents have a red glow around arrows.
-* **Gym-Tier Multiplier**: Estimates battle power boosted by Xanax stacking, using gym-tier energy thresholds to model diminishing returns.
-* **Life Weighting**: Applies a configurable penalty boost for injured opponents, scaled by how close RSI is to parity.
-* **Configurable Settings**: In-script GUI accessible via a floating ⚙️ button:
-
-  1. **High → Med cutoff (%)**: threshold where risk goes from High to Moderate.
-  2. **Med → Low cutoff (%)**: threshold where risk goes from Moderate to Advantage.
-  3. **Life Weight (0–1)**: strength of wounded penalty.
-  4. **API Key Management**: enter, clear, or change your Torn API key without editing the script.
-* **Auto-Update**: Uses `@updateURL` and `@downloadURL` pointing to the raw GitHub script for easy version tracking.
-
-## Installation
-
-1. **Desktop (Tampermonkey/Greasemonkey)**
-
-   * Install [Tampermonkey](https://www.tampermonkey.net/) or Greasemonkey.
-   * Create a new userscript and paste in the contents of `LE_Scouter_Working_Prototype.js` from GitHub raw.
-   * Save and ensure it’s enabled. Visit any Torn page to trigger the API key prompt.
-
-2. **Mobile (Torn PDA)**
-
-   * Open the Torn PDA app’s script manager.
-   * Add a new script using the raw URL:
-
-     ```
-     https://raw.githubusercontent.com/infodump01/LE-Scouter/main/LE_Scouter_Working_Prototype.js
-     ```
-   * Set injection time to **END**.
-   * Save and reload Torn PDA; you’ll be prompted to enter your API key.
-
-## Usage
-
-* **First-time Setup**: On initial load, the floating gear menu auto-opens to the **API Key** tab—paste your Torn API key and save.
-* **Viewing Risk**:
-
-  * Navigate to any user profile—look for the RSI badge under the name header.
-  * On multi-user lists (factions, market, etc.), watch for colored arrows overlaid on profile badges.
-* **Adjust Settings**: Click the ⚙️ button to open the settings modal, tweak thresholds or life weight, then save & reload.
-
-## Under the Hood
-
-1. **Battle Power Estimation**:
-
-   * Combines ELO, attack damage, win/loss ratios, crit rates, net worth, account age, and activity.
-   * Multiplies by a gym-tier factor based on `xantaken * 250` energy to model stat boosts.
-2. **RSI Calculation**:
-
-   ```js
-   raw = (USER_BP / opp_BP) * 100;
-   boost = woundedPct * lifeWeight * Math.min(raw/100, 1);
-   adjusted = raw * (1 + boost);
-   RSI = clamp(adjusted, 0, 200);
-   ```
-3. **Wounded Indicator**:
-
-   * If `opp.life.current < opp.life.maximum`, a red glow and ✚ icon appear on the badge/arrow.
-4. **DOM Injection**:
-
-   * Uses a `MutationObserver` to watch for new user links (`profiles.php?XID=`) and inject arrows in real time.
-
-## Troubleshooting
-* **No arrows or badges**: Check that your manager’s injection time is set to **END** on Torn PDA, refresh page
-* **Script not updating**: Verify the `@updateURL` and `@downloadURL` lines point to the raw GitHub URL above.
-
-## Contributing
-
-Issues and pull requests are welcome! Feel free to suggest new metrics, UI improvements, or platform-specific tweaks.
-
-## License
-
-MIT © 2025 Infodump
+Here’s a full, thorough, GitHub-formatted README for **LE Scouter Base v1.2.4** with dedicated Torn PDA install instructions, full feature explanations, and proper Markdown structure.
+Let me know if you want any tweaks or to split out a dev/contributor section.
 
 ---
 
-*Made with ❤️ for the Torn community*
+# LE Scouter Base
 
+**Version:** 1.2.4
+**For:** Torn City (Web & PDA)
+**Repository:** [infodump01/LE-Scouter](https://github.com/infodump01/LE-Scouter)
+**Raw Script:** [`LE_Scouter_Working_Prototype.js`](https://raw.githubusercontent.com/infodump01/LE-Scouter/main/LE_Scouter_Working_Prototype.js)
 
------
+---
 
+## Overview
 
-Arrows on profiles are an indicator of RISK.
-Risk goes from left to right, far left = less risk to attack and far right = more risk to attack.
-RED = High Risk.
-YELLOW = Moderate Risk.
-GREEN = Low Risk.
-A highlighted risk arrow = account is currently wounded.
+**LE Scouter Base** overlays *Relative Strength Index (RSI)* risk banners and arrows onto Torn City profiles, factions, and market pages, allowing instant, accurate risk assessment for PVP, wars, and trading.
+It’s designed for both desktop web and Torn PDA, adding features like attack buttons on the market, live travel/abroad status icons, and a full-featured settings GUI.
 
-![image](https://github.com/user-attachments/assets/c0072979-63b6-4836-a05a-5073aac203bd)
+---
 
-At 100% the algo suggests that you are about equal in power and thus moderate risk. 50% is very dangerous, and 150% should be relatively easy and not risky to attack. The account below is about equal in power, and is already wounded as indicated by the Red border and medical symbol.
+## Features
 
-![image](https://github.com/user-attachments/assets/3c680d4e-ed6b-4a00-81eb-b40871011aba)
+* **Profile RSI Banners**
+
+  * Adds a colored badge (“RSI xx% — risk class”) under the player profile header, showing your risk compared to the viewed player.
+  * Life % and last action (short form, e.g. `A 32m`) included on the badge.
+  * Drug debuffs and “wounded” (low health) indicators shown directly.
+
+* **Faction/List RSI Arrows**
+
+  * Shows a green, yellow, or red triangle under each player’s honor bar on all lists (faction, job, companies, search, etc.).
+  * Tooltip on hover/tap shows:
+
+    * Exact RSI%
+    * Player’s Life %
+    * Last Action time
+  * Plane icon appears (blue for Traveling, orange for Abroad) if user is out of Torn; tooltip shows travel state live.
+
+* **Settings & Customization**
+
+  * ⚙️ Floating action button (bottom-left) opens a dark-themed settings GUI.
+  * Adjust risk thresholds (for RSI color classes), life/drug weighting, and manage your API key with ease.
+
+* **Market Seller Tools**
+
+  * Every seller in the Item Market gets an instant “Attack” button (glowing red circle) next to their name—click to open the attack screen in a new tab.
+  * New/updated seller rows “flash” bright red so you spot live changes immediately.
+
+* **Desktop and PDA Support**
+
+  * Adapts fully for Torn PDA’s script manager and limited storage model.
+  * Optimized icon sizing and positioning for mobile and web.
+
+---
+
+## Installation
+
+### 1. **Desktop (Browser)**
+
+* **Prerequisites:**
+
+  * Install [Violentmonkey](https://violentmonkey.github.io/) or [Tampermonkey](https://www.tampermonkey.net/) browser extension.
+* **Install the Script:**
+
+  * [Click here to install LE Scouter](https://raw.githubusercontent.com/infodump01/LE-Scouter/main/LE_Scouter_Working_Prototype.js) *(opens raw script for direct install)*
+* **API Key:**
+
+  * On first use, you’ll be prompted for your Torn API key.
+
+    > *You only need “personalstats”, “battlestats”, and “basic” permissions (full key not required).*
+* **Settings:**
+
+  * Use the ⚙️ button in the bottom left to adjust options or update your API key any time.
+
+---
+
+### 2. **Mobile (Torn PDA)**
+
+* Open the Torn PDA app’s script manager.
+* Add a new script using this raw URL:
+
+  ```
+  https://raw.githubusercontent.com/infodump01/LE-Scouter/main/LE_Scouter_Working_Prototype.js
+  ```
+* **Set injection time** to `END`.
+* Save and reload Torn PDA.
+* When prompted, enter your Torn API key (see above for required permissions).
+
+> **Note:** On PDA, all features (RSI, arrows, tooltips, attack buttons, live travel icons, settings panel) are supported and sized for mobile.
+
+---
+
+## How It Works: RSI Calculation
+
+* **Battle Power Estimation:**
+
+  * Script estimates your “BP” (battle power) and compares it to every target, using Torn API’s personal stats plus derived metrics:
+
+    * ELO, Damage, Wins/Losses, Xanax taken (for gym unlocks), Networth, Activity, Crit rate, Win rate, Account age, etc.
+  * *Your own drug debuffs and gym multipliers (from Xanax use) are included automatically.*
+* **Risk Class (RSI %):**
+
+  * If you have a strong advantage, arrow/badge is **green**; moderate is **yellow**; high risk is **red**.
+  * Life %: Opponent’s current health further adjusts their risk score (wounded enemies are easier).
+  * **Tooltip:** All calculations are visible—hover (or tap) for numbers and stats.
+* **Everything is customizable**:
+
+  * Risk thresholds and weighting can be adjusted in the settings panel.
+
+---
+
+## FAQ
+
+**Q: What API key permissions do I need?**
+A: Only “personalstats”, “battlestats”, and “basic”. You do not need a full-access key.
+
+**Q: Where’s the settings panel?**
+A: Click the ⚙️ button in the bottom left at any time. Switch between settings and API key tabs.
+
+**Q: What are the attack icons and red flashes on the market?**
+A: Any new/updated seller flashes red for 1.2s. Every seller has an attack button (red circle) that opens the attack window for fast PVP.
+
+**Q: How do I update or reset my API key?**
+A: Open the settings panel (⚙️), go to the API Key tab, and clear or paste a new key.
+
+**Q: Is my API key stored securely?**
+A: Yes, it’s only stored locally on your device/browser.
+
+---
+
+## Changelog
+
+### v1.2.4 (Market Madness)
+
+* **New:** Attack buttons & row flashes for market sellers (PC & PDA).
+* **Update:** Plane/travel icon, RSI tooltips, and badge rendering tuned for all device sizes.
+* **Bugfixes:** Improved PDA support and compatibility.
+
+### v1.2.3 and earlier
+
+* Plane icon overlays for live travel/abroad status.
+* Full feature parity on PDA.
+* Settings GUI.
+
+*See GitHub releases for full version history.*
+
+---
+
+## Credits
+
+* Script by [infodump01](https://github.com/infodump01)
+* Inspired by FF Scouter
+
+Contributions, bug reports, and suggestions are welcome—open an [issue](https://github.com/infodump01/LE-Scouter/issues) or submit a PR!
+
+---
+
+## License
+
+[MIT](LICENSE)
+
+---
+
+*Enjoy fast, accurate, and visually enhanced scouting on every Torn page—desktop or PDA!*
+
+---
+
+Let me know if you want anything changed, more technical install/troubleshooting, or a “for developers” section!
+
 
 
 
