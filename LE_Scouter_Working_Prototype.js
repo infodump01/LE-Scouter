@@ -1,10 +1,10 @@
 // ==UserScript==
-// @name         LE Scouter Base v1.2.3
+// @name         LE Scouter Base v1.2.4
 // @namespace    Violentmonkey Scripts
 // @match        https://www.torn.com/*
 // @match        https://pda.torn.com/*
-// @version      1.2.3
-// @description  RSI arrow and live-updating plane icon (blue/orange) for travel status; custom tooltip only (never double); RSI banner restored for profile pages
+// @version      1.2.4
+// @description  Market Madness Updates
 // @updateURL    https://raw.githubusercontent.com/infodump01/LE-Scouter/main/LE_Scouter_Working_Prototype.js
 // @downloadURL  https://raw.githubusercontent.com/infodump01/LE-Scouter/main/LE_Scouter_Working_Prototype.js
 // @grant        GM_xmlhttpRequest
@@ -69,10 +69,10 @@
       position: absolute;
       bottom: 0;
       left: 50%;
-      width: 20px !important;
-      height: 20px !important;
-      max-width: 20px !important;
-      max-height: 20px !important;
+      width: 16px !important;
+      height: 16px !important;
+      max-width: 16px !important;
+      max-height: 16px !important;
       pointer-events: auto;
       z-index: 10000;
       transform: translate(-50%, 38%);
@@ -159,10 +159,10 @@
       position: absolute;
       right: 4px;
       bottom: 2px;
-      height: 20px !important;
-      width: 20px !important;
-      max-width: 20px !important;
-      max-height: 20px !important;
+      height: 16px !important;
+      width: 16px !important;
+      max-width: 16px !important;
+      max-height: 16px !important;
       z-index: 2147483646 !important;
       filter: grayscale(1) brightness(0.7);
       opacity: 0.92;
@@ -638,4 +638,150 @@
   window.addEventListener('popstate', injectAll);
   new MutationObserver(m => m.forEach(r => injectAll()))
     .observe(document.body, { childList:true, subtree:true });
+
+// ---- BRIGHTER AND LONGER FLASH-FADE FOR NEW 'AVAILABLE' CELLS ----
+let seenAvail = new WeakSet();
+setInterval(() => {
+  document.querySelectorAll('div').forEach(el => {
+    if (el.textContent.match(/^\d+\s*available$/)) {
+      // Inline transition for maximum priority
+      el.style.transition = "background 3s cubic-bezier(.4,0,.2,1)";
+      if (!seenAvail.has(el)) {
+        seenAvail.add(el);
+        el.style.background = "#ff0000"; // Bright red
+        setTimeout(() => {
+          el.style.background = ""; // Fades out over 3s
+        }, 1200); // Red shows for 1.2s
+      }
+      // Always keep text white, normal
+      el.style.color = "";
+      el.style.fontWeight = "";
+      el.style.fontSize = "";
+    }
+  });
+}, 1000);
+// ---- END PATCH ----
+
+// ==== BEGIN ATTACK BUTTON FOR MARKET SELLERS (CIRCLE ICON WITH RED GLOW) ====
+
+function injectMarketAttackButtons() {
+  document.querySelectorAll('[class*="sellerListWrapper"] ul').forEach(ul => {
+    ul.querySelectorAll('a[href*="profiles.php?XID="]').forEach(profileLink => {
+      if (!profileLink.parentElement.querySelector('.ff-attack-btn')) {
+        const xidMatch = profileLink.getAttribute('href').match(/XID=(\d+)/);
+        if (!xidMatch) return;
+        const xid = xidMatch[1];
+
+        // Create the glowing circle icon button
+        const btn = document.createElement('button');
+        btn.className = 'ff-attack-btn';
+        btn.title = 'Attack this player';
+        btn.style.marginLeft = '5px';
+        btn.style.background = 'transparent';
+        btn.style.border = 'none';
+        btn.style.padding = '0';
+        btn.style.cursor = 'pointer';
+        btn.style.verticalAlign = 'middle';
+
+        // Create the icon with red glow
+        const icon = document.createElement('img');
+        icon.src = 'https://github.com/infodump01/LE-Scouter/raw/main/circle.png';
+        icon.alt = 'Attack';
+        icon.style.width = '16px';
+        icon.style.height = '16px';
+        icon.style.display = 'inline-block';
+        icon.style.filter = 'drop-shadow(0 0 5px #ff1744) drop-shadow(0 0 6px #c62828)';
+        icon.style.transition = 'filter 0.2s';
+
+        // Optional: Stronger glow on hover
+        btn.onmouseover = () => {
+          icon.style.filter = 'drop-shadow(0 0 8px #ff1744) drop-shadow(0 0 14px #c62828)';
+        };
+        btn.onmouseout = () => {
+          icon.style.filter = 'drop-shadow(0 0 5px #ff1744) drop-shadow(0 0 6px #c62828)';
+        };
+
+        btn.appendChild(icon);
+
+        btn.onclick = (e) => {
+          e.preventDefault();
+          window.open(`https://www.torn.com/loader.php?sid=attack&user2ID=${xid}`, '_blank');
+        };
+        profileLink.parentElement.insertBefore(btn, profileLink.nextSibling);
+      }
+    });
+  });
+}
+injectMarketAttackButtons();
+const obs = new MutationObserver(injectMarketAttackButtons);
+obs.observe(document.body, {childList: true, subtree: true});
+
+// ==== END ATTACK BUTTON FOR MARKET SELLERS (CIRCLE ICON WITH RED GLOW) ====
+
+// ==== BEGIN SCOPED PDA/PC MARKET PATCH ====
+
+// Track seen rows to prevent double effects
+var seenRows = new WeakSet();
+
+function flashAndAttackPatch() {
+  document.querySelectorAll('[class*="rowWrapper"]').forEach(function(row) {
+    // FLASH: Highlight only new rows
+    if (!seenRows.has(row)) {
+      seenRows.add(row);
+      row.style.transition = "background 2.5s cubic-bezier(.4,0,.2,1)";
+      row.style.background = "#ff3e30";
+      setTimeout(function() {
+        row.style.background = "";
+      }, 1200);
+    }
+
+    // ATTACK BUTTON: Prevent double-insert
+    if (row.querySelector('.ff-attack-btn')) return;
+
+    // Look for a profile link (for seller XID)
+    var profileLink = row.querySelector('a[href*="profiles.php?XID="]');
+    if (!profileLink) return; // skip anonymous sellers
+
+    var xidMatch = profileLink.getAttribute('href').match(/XID=(\d+)/);
+    if (!xidMatch) return;
+    var xid = xidMatch[1];
+
+    // Use <a> for best mobile support
+    var a = document.createElement('a');
+    a.href = 'https://www.torn.com/loader.php?sid=attack&user2ID=' + xid;
+    a.target = '_blank';
+    a.className = 'ff-attack-btn';
+    a.title = 'Attack this player';
+    a.style.marginLeft = '5px';
+    a.style.background = 'transparent';
+    a.style.border = 'none';
+    a.style.padding = '0';
+    a.style.cursor = 'pointer';
+    a.style.verticalAlign = 'middle';
+    a.style.display = 'inline-block';
+
+    var icon = document.createElement('img');
+    icon.src = 'https://github.com/infodump01/LE-Scouter/raw/main/circle.png';
+    icon.alt = 'Attack';
+    icon.style.width = '16px';
+    icon.style.height = '16px';
+    icon.style.display = 'inline-block';
+    icon.style.filter = 'drop-shadow(0 0 5px #ff1744) drop-shadow(0 0 6px #c62828)';
+    icon.style.transition = 'filter 0.2s';
+
+    a.appendChild(icon);
+
+    // Insert after the profile link (you can tweak this if you want)
+    profileLink.parentElement.appendChild(a);
+  });
+}
+
+// Initial run and observer for dynamic page/app loads
+flashAndAttackPatch();
+var marketobs = new MutationObserver(flashAndAttackPatch);
+marketobs.observe(document.body, {childList: true, subtree: true});
+
+// ==== END SCOPED PDA/PC MARKET PATCH ====
+
+
 })();
