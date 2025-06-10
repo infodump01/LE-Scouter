@@ -1,5 +1,3 @@
----
-
 # LE Scouter Base
 
 **Version:** 1.2.4
@@ -53,26 +51,22 @@ It’s designed for both desktop web and Torn PDA, adding features like attack b
 
 ## Installation
 
-### 1. **Desktop (Browser)**
+### 1. Desktop (Browser)
 
 * **Prerequisites:**
-
-  * Install [Violentmonkey](https://violentmonkey.github.io/) or [Tampermonkey](https://www.tampermonkey.net/) browser extension.
+  Install [Violentmonkey](https://violentmonkey.github.io/) or [Tampermonkey](https://www.tampermonkey.net/) browser extension.
 * **Install the Script:**
-
-  * [Click here to install LE Scouter](https://raw.githubusercontent.com/infodump01/LE-Scouter/main/LE_Scouter_Working_Prototype.js) *(opens raw script for direct install)*
+  [Click here to install LE Scouter](https://raw.githubusercontent.com/infodump01/LE-Scouter/main/LE_Scouter_Working_Prototype.js) *(opens raw script for direct install)*
 * **API Key:**
+  On first use, you’ll be prompted for your Torn API key.
 
-  * On first use, you’ll be prompted for your Torn API key.
-
-    > *You only need “personalstats”, “battlestats”, and “basic” permissions (full key not required).*
+  > *You only need “personalstats”, “battlestats”, and “basic” permissions (full key not required).*
 * **Settings:**
-
-  * Use the ⚙️ button in the bottom left to adjust options or update your API key any time.
+  Use the ⚙️ button in the bottom left to adjust options or update your API key any time.
 
 ---
 
-### 2. **Mobile (Torn PDA)**
+### 2. Mobile (Torn PDA)
 
 * Open the Torn PDA app’s script manager.
 * Add a new script using this raw URL:
@@ -80,7 +74,7 @@ It’s designed for both desktop web and Torn PDA, adding features like attack b
   ```
   https://raw.githubusercontent.com/infodump01/LE-Scouter/main/LE_Scouter_Working_Prototype.js
   ```
-* **Set injection time** to `END`.
+* **Set injection time** to **END**.
 * Save and reload Torn PDA.
 * When prompted, enter your Torn API key (see above for required permissions).
 
@@ -91,19 +85,17 @@ It’s designed for both desktop web and Torn PDA, adding features like attack b
 ## How It Works: RSI Calculation
 
 * **Battle Power Estimation:**
+  Script estimates your “BP” (battle power) and compares it to every target, using Torn API’s personal stats plus derived metrics:
 
-  * Script estimates your “BP” (battle power) and compares it to every target, using Torn API’s personal stats plus derived metrics:
-
-    * ELO, Damage, Wins/Losses, Xanax taken (for gym unlocks), Networth, Activity, Crit rate, Win rate, Account age, etc.
-  * *Your own drug debuffs and gym multipliers (from Xanax use) are included automatically.*
+  * ELO, Damage, Wins/Losses, Xanax taken (for gym unlocks), Networth, Activity, Crit rate, Win rate, Account age, etc.
+    *Your own drug debuffs and gym multipliers (from Xanax use) are included automatically.*
 * **Risk Class (RSI %):**
 
   * If you have a strong advantage, arrow/badge is **green**; moderate is **yellow**; high risk is **red**.
   * Life %: Opponent’s current health further adjusts their risk score (wounded enemies are easier).
   * **Tooltip:** All calculations are visible—hover (or tap) for numbers and stats.
 * **Everything is customizable**:
-
-  * Risk thresholds and weighting can be adjusted in the settings panel.
+  Risk thresholds and weighting can be adjusted in the settings panel.
 
 ---
 
@@ -147,7 +139,7 @@ A: Yes, it’s only stored locally on your device/browser.
 ## Credits
 
 * Script by [infodump01](https://github.com/infodump01)
-* Inspired by FF Scouter
+* Inspired by the Torn Scouter, FF Scouter, and Torn scripting communities.
 
 Contributions, bug reports, and suggestions are welcome—open an [issue](https://github.com/infodump01/LE-Scouter/issues) or submit a PR!
 
@@ -163,60 +155,4 @@ Contributions, bug reports, and suggestions are welcome—open an [issue](https:
 
 ---
 
-Let me know if you want anything changed, more technical install/troubleshooting, or a “for developers” section!
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+If you want a **“for developers”** or API reference section, just let me know!
