@@ -5,6 +5,12 @@
 **Repository:** [infodump01/LE-Scouter](https://github.com/infodump01/LE-Scouter)
 **Raw Script:** [`LE_Scouter_Working_Prototype.js`](https://raw.githubusercontent.com/infodump01/LE-Scouter/main/LE_Scouter_Working_Prototype.js)
 
+![image](https://github.com/user-attachments/assets/7f9b1e8b-8757-46db-9a6a-d383eef59e51)
+
+![image](https://github.com/user-attachments/assets/50f97e4c-a142-4d5c-8d24-a938ef199752)
+
+![image](https://github.com/user-attachments/assets/17a28540-c791-4cda-81ba-83cd791a8efa)
+
 ---
 
 ## Overview
