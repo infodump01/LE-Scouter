@@ -1,6 +1,3 @@
-Here’s a full, thorough, GitHub-formatted README for **LE Scouter Base v1.2.4** with dedicated Torn PDA install instructions, full feature explanations, and proper Markdown structure.
-Let me know if you want any tweaks or to split out a dev/contributor section.
-
 ---
 
 # LE Scouter Base
