@@ -1,10 +1,10 @@
 // ==UserScript==
-// @name         LE Scouter Base v1.2.4
+// @name         LE Scouter Base v1.2.5
 // @namespace    Violentmonkey Scripts
 // @match        https://www.torn.com/*
 // @match        https://pda.torn.com/*
-// @version      1.2.4
-// @description  Market Madness Updates
+// @version      1.2.5
+// @description  Hospital Patch
 // @updateURL    https://raw.githubusercontent.com/infodump01/LE-Scouter/main/LE_Scouter_Working_Prototype.js
 // @downloadURL  https://raw.githubusercontent.com/infodump01/LE-Scouter/main/LE_Scouter_Working_Prototype.js
 // @grant        GM_xmlhttpRequest
@@ -177,6 +177,26 @@
     }
     .ff-travel-icon:hover {
       filter: brightness(1.4) !important;
+    }
+    .ff-hospital-icon {
+      position: absolute;
+      right: 4px;
+      bottom: 2px;
+      height: 16px !important;
+      width: 16px !important;
+      max-width: 16px !important;
+      max-height: 16px !important;
+      z-index: 2147483646 !important;
+      opacity: 0.92;
+      pointer-events: auto;
+      transition: filter 0.15s, box-shadow 0.15s;
+    }
+      .ff-tooltip-viewport a {
+      color: #ff5252 !important;
+      text-decoration: underline;
+    }
+    .ff-tooltip-viewport a:visited {
+      color: #e53935 !important;
     }
   `);
 
@@ -393,8 +413,8 @@
       if (!userIdMatch) return;
       const userId = userIdMatch[1];
       apiGet(`/user/${userId}?selections=personalstats,basic,profile`, d => {
-        // Remove any existing triangle/plane
-        Array.from(honorTextWrap.querySelectorAll('.ff-list-arrow-img, .ff-travel-icon')).forEach(el => el.remove());
+        // Remove any existing triangle/plane/hospital
+        Array.from(honorTextWrap.querySelectorAll('.ff-list-arrow-img, .ff-travel-icon, .ff-hospital-icon')).forEach(el => el.remove());
 
         // TRIANGLE ARROW as before:
         const oppBP = baseCalc(d.personalstats, d.basic)
@@ -458,50 +478,118 @@
         });
         honorTextWrap.appendChild(img);
 
-        // PLANE ICON if Traveling/Abroad, with live update:
-        function addPlaneIcon(statusData, triggerEvt) {
-          // Remove old icons
-          Array.from(honorTextWrap.querySelectorAll('.ff-travel-icon')).forEach(el => el.remove());
-          if (statusData.status && (statusData.status.state === "Traveling" || statusData.status.state === "Abroad")) {
-            const plane = document.createElement('img');
-            plane.src = PLANE_ICON_URL;
-            plane.className = 'ff-travel-icon' + (statusData.status.state === "Traveling"
-              ? ' ff-traveling'
-              : ' ff-abroad');
-            // No .title set here!
-            plane.alt = statusData.status.state;
-            plane.setAttribute('draggable', 'false');
-
-            const updatePlaneStatus = (ev) => {
-              apiGet(`/user/${userId}?selections=basic`, newStatus => {
-                addPlaneIcon(newStatus, ev);
-                if (newStatus.status && (newStatus.status.state === "Traveling" || newStatus.status.state === "Abroad")) {
-                  showTooltipAt(ev.pageX, ev.pageY, newStatus.status.description || newStatus.status.state);
-                } else {
-                  hideTooltip();
-                }
-              });
-            };
-
-            plane.addEventListener('mouseenter', updatePlaneStatus);
-            plane.addEventListener('mousemove', function(ev2){
-              showTooltipAt(ev2.pageX, ev2.pageY, statusData.status.description || statusData.status.state);
-            });
-            plane.addEventListener('mouseleave', hideTooltip);
-            plane.addEventListener('click', function(ev) {
-              ev.preventDefault();
-              ev.stopPropagation();
-              updatePlaneStatus(ev);
-            });
-            honorTextWrap.appendChild(plane);
-            if (triggerEvt && triggerEvt.pageX) showTooltipAt(triggerEvt.pageX, triggerEvt.pageY, statusData.status.description || statusData.status.state);
-          } else {
-            hideTooltip();
-          }
-        }
-        apiGet(`/user/${userId}?selections=basic`, statusData => addPlaneIcon(statusData));
+        // ---- HOSPITAL/TRAVEL ICON LOGIC START ----
+        apiGet(`/user/${userId}?selections=basic`, statusData => addStatusIcon(statusData, honorTextWrap, userId));
+        // ---- HOSPITAL/TRAVEL ICON LOGIC END ----
       });
     });
+  }
+
+  // --- Hybrid tooltip: always instant, background updates if changed ---
+  function addStatusIcon(statusData, honorTextWrap, userId) {
+    if (!statusData || !statusData.status) return;
+    Array.from(honorTextWrap.querySelectorAll('.ff-travel-icon, .ff-hospital-icon')).forEach(el => el.remove());
+
+    function makeTooltip(s) {
+      let tip = s.status.description || s.status.state;
+      if (s.status.details) tip += `<br>${s.status.details}`;
+      return tip;
+    }
+
+    // HOSPITAL TAKES PRIORITY OVER TRAVEL
+    if (statusData.status.state === "Hospital") {
+      let isAbroad = /hospital for \d+ mins in ([A-Za-z ]+) hospital/i.test(statusData.status.description);
+      let hospitalIcon = document.createElement('img');
+      hospitalIcon.src = "https://github.com/infodump01/LE-Scouter/raw/main/hospital.png";
+      hospitalIcon.className = "ff-hospital-icon";
+      hospitalIcon.alt = "Hospital";
+      hospitalIcon.setAttribute('draggable', 'false');
+      hospitalIcon.style.position = "absolute";
+      hospitalIcon.style.right = "4px";
+      hospitalIcon.style.bottom = "2px";
+      hospitalIcon.style.height = "16px";
+      hospitalIcon.style.width = "16px";
+      hospitalIcon.style.maxWidth = "16px";
+      hospitalIcon.style.maxHeight = "16px";
+      hospitalIcon.style.zIndex = "2147483646";
+      hospitalIcon.style.opacity = "0.92";
+      hospitalIcon.style.pointerEvents = "auto";
+      hospitalIcon.style.filter = isAbroad
+        ? "grayscale(0) brightness(1) drop-shadow(0 0 3px #ff9800) drop-shadow(0 0 2px #ffb300)" // yellow
+        : "grayscale(0) brightness(1) drop-shadow(0 0 3px #2094fa) drop-shadow(0 0 2px #42a5f5)"; // blue
+
+      let lastTooltip = makeTooltip(statusData);
+
+      hospitalIcon.addEventListener('mouseenter', function(ev) {
+        showTooltipAt(ev.pageX, ev.pageY, lastTooltip);
+        apiGet(`/user/${userId}?selections=basic`, function(newStatus) {
+          if (!newStatus.status) return;
+          if (JSON.stringify(newStatus.status) !== JSON.stringify(statusData.status)) {
+            Array.from(honorTextWrap.querySelectorAll('.ff-hospital-icon, .ff-travel-icon')).forEach(el => el.remove());
+            addStatusIcon(newStatus, honorTextWrap, userId);
+            showTooltipAt(ev.pageX, ev.pageY, makeTooltip(newStatus));
+          }
+        });
+      });
+      hospitalIcon.addEventListener('mousemove', function(ev) {
+        showTooltipAt(ev.pageX, ev.pageY, lastTooltip);
+      });
+      hospitalIcon.addEventListener('mouseleave', hideTooltip);
+      hospitalIcon.addEventListener('click', function(ev) {
+        ev.preventDefault(); ev.stopPropagation();
+        showTooltipAt(ev.pageX, ev.pageY, lastTooltip);
+        setTimeout(hideTooltip, 2000);
+      });
+      honorTextWrap.appendChild(hospitalIcon);
+      return; // Don't render plane if in hospital
+    }
+
+    // If not in hospital, travel/abroad logic as before (hybrid tooltip)
+    if (statusData.status.state === "Traveling" || statusData.status.state === "Abroad") {
+      const plane = document.createElement('img');
+      plane.src = PLANE_ICON_URL;
+      plane.className = 'ff-travel-icon' + (statusData.status.state === "Traveling"
+        ? ' ff-traveling'
+        : ' ff-abroad');
+      plane.alt = statusData.status.state;
+      plane.setAttribute('draggable', 'false');
+      plane.style.position = "absolute";
+      plane.style.right = "4px";
+      plane.style.bottom = "2px";
+      plane.style.height = "16px";
+      plane.style.width = "16px";
+      plane.style.maxWidth = "16px";
+      plane.style.maxHeight = "16px";
+      plane.style.zIndex = "2147483646";
+      plane.style.opacity = "0.92";
+      plane.style.pointerEvents = "auto";
+
+      let lastTooltip = makeTooltip(statusData);
+
+      plane.addEventListener('mouseenter', function(ev) {
+        showTooltipAt(ev.pageX, ev.pageY, lastTooltip);
+        apiGet(`/user/${userId}?selections=basic`, function(newStatus) {
+          if (!newStatus.status) return;
+          if (JSON.stringify(newStatus.status) !== JSON.stringify(statusData.status)) {
+            Array.from(honorTextWrap.querySelectorAll('.ff-travel-icon, .ff-hospital-icon')).forEach(el => el.remove());
+            addStatusIcon(newStatus, honorTextWrap, userId);
+            showTooltipAt(ev.pageX, ev.pageY, makeTooltip(newStatus));
+          }
+        });
+      });
+      plane.addEventListener('mousemove', function(ev) {
+        showTooltipAt(ev.pageX, ev.pageY, lastTooltip);
+      });
+      plane.addEventListener('mouseleave', hideTooltip);
+      plane.addEventListener('click', function(ev) {
+        ev.preventDefault(); ev.stopPropagation();
+        showTooltipAt(ev.pageX, ev.pageY, lastTooltip);
+        setTimeout(hideTooltip, 2000);
+      });
+      honorTextWrap.appendChild(plane);
+    } else {
+      hideTooltip();
+    }
   }
 
   function injectOneTriangle(honorTextWrap, d, userId, e) {
@@ -639,149 +727,148 @@
   new MutationObserver(m => m.forEach(r => injectAll()))
     .observe(document.body, { childList:true, subtree:true });
 
-// ---- BRIGHTER AND LONGER FLASH-FADE FOR NEW 'AVAILABLE' CELLS ----
-let seenAvail = new WeakSet();
-setInterval(() => {
-  document.querySelectorAll('div').forEach(el => {
-    if (el.textContent.match(/^\d+\s*available$/)) {
-      // Inline transition for maximum priority
-      el.style.transition = "background 3s cubic-bezier(.4,0,.2,1)";
-      if (!seenAvail.has(el)) {
-        seenAvail.add(el);
-        el.style.background = "#ff0000"; // Bright red
-        setTimeout(() => {
-          el.style.background = ""; // Fades out over 3s
-        }, 1200); // Red shows for 1.2s
-      }
-      // Always keep text white, normal
-      el.style.color = "";
-      el.style.fontWeight = "";
-      el.style.fontSize = "";
-    }
-  });
-}, 1000);
-// ---- END PATCH ----
-
-// ==== BEGIN ATTACK BUTTON FOR MARKET SELLERS (CIRCLE ICON WITH RED GLOW) ====
-
-function injectMarketAttackButtons() {
-  document.querySelectorAll('[class*="sellerListWrapper"] ul').forEach(ul => {
-    ul.querySelectorAll('a[href*="profiles.php?XID="]').forEach(profileLink => {
-      if (!profileLink.parentElement.querySelector('.ff-attack-btn')) {
-        const xidMatch = profileLink.getAttribute('href').match(/XID=(\d+)/);
-        if (!xidMatch) return;
-        const xid = xidMatch[1];
-
-        // Create the glowing circle icon button
-        const btn = document.createElement('button');
-        btn.className = 'ff-attack-btn';
-        btn.title = 'Attack this player';
-        btn.style.marginLeft = '5px';
-        btn.style.background = 'transparent';
-        btn.style.border = 'none';
-        btn.style.padding = '0';
-        btn.style.cursor = 'pointer';
-        btn.style.verticalAlign = 'middle';
-
-        // Create the icon with red glow
-        const icon = document.createElement('img');
-        icon.src = 'https://github.com/infodump01/LE-Scouter/raw/main/circle.png';
-        icon.alt = 'Attack';
-        icon.style.width = '16px';
-        icon.style.height = '16px';
-        icon.style.display = 'inline-block';
-        icon.style.filter = 'drop-shadow(0 0 5px #ff1744) drop-shadow(0 0 6px #c62828)';
-        icon.style.transition = 'filter 0.2s';
-
-        // Optional: Stronger glow on hover
-        btn.onmouseover = () => {
-          icon.style.filter = 'drop-shadow(0 0 8px #ff1744) drop-shadow(0 0 14px #c62828)';
-        };
-        btn.onmouseout = () => {
-          icon.style.filter = 'drop-shadow(0 0 5px #ff1744) drop-shadow(0 0 6px #c62828)';
-        };
-
-        btn.appendChild(icon);
-
-        btn.onclick = (e) => {
-          e.preventDefault();
-          window.open(`https://www.torn.com/loader.php?sid=attack&user2ID=${xid}`, '_blank');
-        };
-        profileLink.parentElement.insertBefore(btn, profileLink.nextSibling);
+  // ---- BRIGHTER AND LONGER FLASH-FADE FOR NEW 'AVAILABLE' CELLS ----
+  let seenAvail = new WeakSet();
+  setInterval(() => {
+    document.querySelectorAll('div').forEach(el => {
+      if (el.textContent.match(/^\d+\s*available$/)) {
+        // Inline transition for maximum priority
+        el.style.transition = "background 3s cubic-bezier(.4,0,.2,1)";
+        if (!seenAvail.has(el)) {
+          seenAvail.add(el);
+          el.style.background = "#ff0000"; // Bright red
+          setTimeout(() => {
+            el.style.background = ""; // Fades out over 3s
+          }, 1200); // Red shows for 1.2s
+        }
+        // Always keep text white, normal
+        el.style.color = "";
+        el.style.fontWeight = "";
+        el.style.fontSize = "";
       }
     });
-  });
-}
-injectMarketAttackButtons();
-const obs = new MutationObserver(injectMarketAttackButtons);
-obs.observe(document.body, {childList: true, subtree: true});
+  }, 1000);
+  // ---- END PATCH ----
 
-// ==== END ATTACK BUTTON FOR MARKET SELLERS (CIRCLE ICON WITH RED GLOW) ====
+  // ==== BEGIN ATTACK BUTTON FOR MARKET SELLERS (CIRCLE ICON WITH RED GLOW) ====
 
-// ==== BEGIN SCOPED PDA/PC MARKET PATCH ====
+  function injectMarketAttackButtons() {
+    document.querySelectorAll('[class*="sellerListWrapper"] ul').forEach(ul => {
+      ul.querySelectorAll('a[href*="profiles.php?XID="]').forEach(profileLink => {
+        if (!profileLink.parentElement.querySelector('.ff-attack-btn')) {
+          const xidMatch = profileLink.getAttribute('href').match(/XID=(\d+)/);
+          if (!xidMatch) return;
+          const xid = xidMatch[1];
 
-// Track seen rows to prevent double effects
-var seenRows = new WeakSet();
+          // Create the glowing circle icon button
+          const btn = document.createElement('button');
+          btn.className = 'ff-attack-btn';
+          btn.title = 'Attack this player';
+          btn.style.marginLeft = '5px';
+          btn.style.background = 'transparent';
+          btn.style.border = 'none';
+          btn.style.padding = '0';
+          btn.style.cursor = 'pointer';
+          btn.style.verticalAlign = 'middle';
 
-function flashAndAttackPatch() {
-  document.querySelectorAll('[class*="rowWrapper"]').forEach(function(row) {
-    // FLASH: Highlight only new rows
-    if (!seenRows.has(row)) {
-      seenRows.add(row);
-      row.style.transition = "background 2.5s cubic-bezier(.4,0,.2,1)";
-      row.style.background = "#ff3e30";
-      setTimeout(function() {
-        row.style.background = "";
-      }, 1200);
-    }
+          // Create the icon with red glow
+          const icon = document.createElement('img');
+          icon.src = 'https://github.com/infodump01/LE-Scouter/raw/main/circle.png';
+          icon.alt = 'Attack';
+          icon.style.width = '16px';
+          icon.style.height = '16px';
+          icon.style.display = 'inline-block';
+          icon.style.filter = 'drop-shadow(0 0 5px #ff1744) drop-shadow(0 0 6px #c62828)';
+          icon.style.transition = 'filter 0.2s';
 
-    // ATTACK BUTTON: Prevent double-insert
-    if (row.querySelector('.ff-attack-btn')) return;
+          // Optional: Stronger glow on hover
+          btn.onmouseover = () => {
+            icon.style.filter = 'drop-shadow(0 0 8px #ff1744) drop-shadow(0 0 14px #c62828)';
+          };
+          btn.onmouseout = () => {
+            icon.style.filter = 'drop-shadow(0 0 5px #ff1744) drop-shadow(0 0 6px #c62828)';
+          };
 
-    // Look for a profile link (for seller XID)
-    var profileLink = row.querySelector('a[href*="profiles.php?XID="]');
-    if (!profileLink) return; // skip anonymous sellers
+          btn.appendChild(icon);
 
-    var xidMatch = profileLink.getAttribute('href').match(/XID=(\d+)/);
-    if (!xidMatch) return;
-    var xid = xidMatch[1];
+          btn.onclick = (e) => {
+            e.preventDefault();
+            window.open(`https://www.torn.com/loader.php?sid=attack&user2ID=${xid}`, '_blank');
+          };
+          profileLink.parentElement.insertBefore(btn, profileLink.nextSibling);
+        }
+      });
+    });
+  }
+  injectMarketAttackButtons();
+  const obs = new MutationObserver(injectMarketAttackButtons);
+  obs.observe(document.body, {childList: true, subtree: true});
 
-    // Use <a> for best mobile support
-    var a = document.createElement('a');
-    a.href = 'https://www.torn.com/loader.php?sid=attack&user2ID=' + xid;
-    a.target = '_blank';
-    a.className = 'ff-attack-btn';
-    a.title = 'Attack this player';
-    a.style.marginLeft = '5px';
-    a.style.background = 'transparent';
-    a.style.border = 'none';
-    a.style.padding = '0';
-    a.style.cursor = 'pointer';
-    a.style.verticalAlign = 'middle';
-    a.style.display = 'inline-block';
+  // ==== END ATTACK BUTTON FOR MARKET SELLERS (CIRCLE ICON WITH RED GLOW) ====
 
-    var icon = document.createElement('img');
-    icon.src = 'https://github.com/infodump01/LE-Scouter/raw/main/circle.png';
-    icon.alt = 'Attack';
-    icon.style.width = '16px';
-    icon.style.height = '16px';
-    icon.style.display = 'inline-block';
-    icon.style.filter = 'drop-shadow(0 0 5px #ff1744) drop-shadow(0 0 6px #c62828)';
-    icon.style.transition = 'filter 0.2s';
+  // ==== BEGIN SCOPED PDA/PC MARKET PATCH ====
 
-    a.appendChild(icon);
+  // Track seen rows to prevent double effects
+  var seenRows = new WeakSet();
 
-    // Insert after the profile link (you can tweak this if you want)
-    profileLink.parentElement.appendChild(a);
-  });
-}
+  function flashAndAttackPatch() {
+    document.querySelectorAll('[class*="rowWrapper"]').forEach(function(row) {
+      // FLASH: Highlight only new rows
+      if (!seenRows.has(row)) {
+        seenRows.add(row);
+        row.style.transition = "background 2.5s cubic-bezier(.4,0,.2,1)";
+        row.style.background = "#ff3e30";
+        setTimeout(function() {
+          row.style.background = "";
+        }, 1200);
+      }
 
-// Initial run and observer for dynamic page/app loads
-flashAndAttackPatch();
-var marketobs = new MutationObserver(flashAndAttackPatch);
-marketobs.observe(document.body, {childList: true, subtree: true});
+      // ATTACK BUTTON: Prevent double-insert
+      if (row.querySelector('.ff-attack-btn')) return;
 
-// ==== END SCOPED PDA/PC MARKET PATCH ====
+      // Look for a profile link (for seller XID)
+      var profileLink = row.querySelector('a[href*="profiles.php?XID="]');
+      if (!profileLink) return; // skip anonymous sellers
 
+      var xidMatch = profileLink.getAttribute('href').match(/XID=(\d+)/);
+      if (!xidMatch) return;
+      var xid = xidMatch[1];
+
+      // Use <a> for best mobile support
+      var a = document.createElement('a');
+      a.href = 'https://www.torn.com/loader.php?sid=attack&user2ID=' + xid;
+      a.target = '_blank';
+      a.className = 'ff-attack-btn';
+      a.title = 'Attack this player';
+      a.style.marginLeft = '5px';
+      a.style.background = 'transparent';
+      a.style.border = 'none';
+      a.style.padding = '0';
+      a.style.cursor = 'pointer';
+      a.style.verticalAlign = 'middle';
+      a.style.display = 'inline-block';
+
+      var icon = document.createElement('img');
+      icon.src = 'https://github.com/infodump01/LE-Scouter/raw/main/circle.png';
+      icon.alt = 'Attack';
+      icon.style.width = '16px';
+      icon.style.height = '16px';
+      icon.style.display = 'inline-block';
+      icon.style.filter = 'drop-shadow(0 0 5px #ff1744) drop-shadow(0 0 6px #c62828)';
+      icon.style.transition = 'filter 0.2s';
+
+      a.appendChild(icon);
+
+      // Insert after the profile link (you can tweak this if you want)
+      profileLink.parentElement.appendChild(a);
+    });
+  }
+
+  // Initial run and observer for dynamic page/app loads
+  flashAndAttackPatch();
+  var marketobs = new MutationObserver(flashAndAttackPatch);
+  marketobs.observe(document.body, {childList: true, subtree: true});
+
+  // ==== END SCOPED PDA/PC MARKET PATCH ====
 
 })();
