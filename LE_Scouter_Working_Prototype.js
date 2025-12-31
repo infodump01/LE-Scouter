@@ -1,10 +1,10 @@
 // ==UserScript==
-// @name         ATK Scouter Base v1.4.5
+// @name         ATK Scouter Base v1.5.4
 // @namespace    Violentmonkey Scripts
 // @match        https://www.torn.com/*
 // @match        https://pda.torn.com/*
-// @version      1.4.5
-// @description  RSI combat analysis + fight outcome logging + IndexedDB analytics
+// @version      1.5.4
+// @description  RSI combat analysis + fight intelligence + auto-learning
 // @updateURL    https://raw.githubusercontent.com/infodump01/LE-Scouter/main/LE_Scouter_Working_Prototype.js
 // @downloadURL  https://raw.githubusercontent.com/infodump01/LE-Scouter/main/LE_Scouter_Working_Prototype.js
 // @grant        GM_xmlhttpRequest
@@ -22,7 +22,7 @@
   // CONSTANTS
   // ============================================================================
 
-  const VERSION = '1.4.5';
+  const VERSION = '1.5.4';
 
   const GREEN_ARROW_UP  = "data:image/svg+xml;utf8,<svg width='20' height='20' xmlns='http://www.w3.org/2000/svg'><polygon points='10,3 19,17 1,17' fill='%232e7d32'/></svg>";
   const YELLOW_ARROW_UP = "data:image/svg+xml;utf8,<svg width='20' height='20' xmlns='http://www.w3.org/2000/svg'><polygon points='10,3 19,17 1,17' fill='%23f9a825'/></svg>";
@@ -118,7 +118,22 @@
     lowHigh: 100,
     highMed: 120,
     lifeWeight: 0.1,
-    drugWeight: 0.1
+    drugWeight: 0.1,
+    // Bounty Sniper defaults
+    sniperEnabled: false,
+    sniperMinReward: 100000,
+    sniperMaxLevel: 100,
+    sniperRsiMin: 80,
+    sniperRsiMax: 200,
+    sniperShowOkay: true,
+    sniperShowHospital: true,
+    sniperHospitalMins: 1,
+    sniperShowTraveling: false,
+    sniperApiBudget: 10,
+    sniperPagesToScan: 10,
+    sniperSoundAlert: false,
+    sniperSortBy: 'value', // 'value', 'reward', 'rsi', 'beaten'
+    sniperFetchInterval: 45
   };
 
   let API_KEY = Env.getValue('api_key', '');
@@ -126,7 +141,22 @@
     lowHigh:    +Env.getValue('threshold_lowHigh', DEFAULTS.lowHigh),
     highMed:    +Env.getValue('threshold_highMed', DEFAULTS.highMed),
     lifeWeight: +Env.getValue('lifeWeight', DEFAULTS.lifeWeight),
-    drugWeight: +Env.getValue('drugWeight', DEFAULTS.drugWeight)
+    drugWeight: +Env.getValue('drugWeight', DEFAULTS.drugWeight),
+    // Bounty Sniper settings
+    sniperEnabled:      Env.getValue('sniperEnabled', DEFAULTS.sniperEnabled) === true || Env.getValue('sniperEnabled', DEFAULTS.sniperEnabled) === 'true',
+    sniperMinReward:    +Env.getValue('sniperMinReward', DEFAULTS.sniperMinReward),
+    sniperMaxLevel:     +Env.getValue('sniperMaxLevel', DEFAULTS.sniperMaxLevel),
+    sniperRsiMin:       +Env.getValue('sniperRsiMin', DEFAULTS.sniperRsiMin),
+    sniperRsiMax:       +Env.getValue('sniperRsiMax', DEFAULTS.sniperRsiMax),
+    sniperShowOkay:     Env.getValue('sniperShowOkay', DEFAULTS.sniperShowOkay) === true || Env.getValue('sniperShowOkay', DEFAULTS.sniperShowOkay) === 'true',
+    sniperShowHospital: Env.getValue('sniperShowHospital', DEFAULTS.sniperShowHospital) === true || Env.getValue('sniperShowHospital', DEFAULTS.sniperShowHospital) === 'true',
+    sniperHospitalMins: +Env.getValue('sniperHospitalMins', DEFAULTS.sniperHospitalMins),
+    sniperShowTraveling: Env.getValue('sniperShowTraveling', DEFAULTS.sniperShowTraveling) === true || Env.getValue('sniperShowTraveling', DEFAULTS.sniperShowTraveling) === 'true',
+    sniperApiBudget:    +Env.getValue('sniperApiBudget', DEFAULTS.sniperApiBudget),
+    sniperPagesToScan:  +Env.getValue('sniperPagesToScan', DEFAULTS.sniperPagesToScan),
+    sniperSoundAlert:   Env.getValue('sniperSoundAlert', DEFAULTS.sniperSoundAlert) === true || Env.getValue('sniperSoundAlert', DEFAULTS.sniperSoundAlert) === 'true',
+    sniperSortBy:       Env.getValue('sniperSortBy', DEFAULTS.sniperSortBy),
+    sniperFetchInterval: +Env.getValue('sniperFetchInterval', DEFAULTS.sniperFetchInterval)
   };
 
   // ============================================================================
@@ -157,6 +187,12 @@
     }
     .honor-text-wrap {
       position: relative !important;
+    }
+
+    /* Bounty page uses same positioning as faction pages */
+    li[data-ff-bounty="1"] > div {
+      position: relative !important;
+      overflow: visible !important;
     }
 
     /* List arrow indicators */
@@ -219,6 +255,212 @@
       transition: background 0.2s;
     }
     .ff-fab:hover { background: #333; }
+
+    /* Bounty Sniper Panel - Mobile Optimized & Draggable */
+    .ff-sniper-panel {
+      position: fixed;
+      bottom: 20px;
+      left: 80px;
+      width: 240px;
+      background: linear-gradient(135deg, rgba(25,25,35,0.98) 0%, rgba(15,15,25,0.98) 100%);
+      border: 1px solid rgba(255,255,255,0.15);
+      border-radius: 8px;
+      z-index: 10000;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.6);
+      font-size: 12px;
+      color: #e0e0e0;
+      overflow: hidden;
+      touch-action: none;
+    }
+    .ff-sniper-panel.dragging {
+      box-shadow: 0 8px 32px rgba(79,195,247,0.3);
+      opacity: 0.95;
+    }
+    .ff-sniper-panel.collapsed .ff-sniper-list,
+    .ff-sniper-panel.collapsed .ff-sniper-status {
+      display: none;
+    }
+    .ff-sniper-panel.follower {
+      border-color: rgba(255,193,7,0.4);
+    }
+    .ff-sniper-panel.follower .ff-sniper-leader-btn {
+      display: inline-flex;
+    }
+    .ff-sniper-leader-btn {
+      display: none;
+      font-size: 12px;
+      cursor: pointer;
+      padding: 2px 4px;
+      margin-left: 4px;
+      border-radius: 4px;
+      background: rgba(255,193,7,0.2);
+      align-items: center;
+      justify-content: center;
+      transition: background 0.2s;
+    }
+    .ff-sniper-leader-btn:hover {
+      background: rgba(255,193,7,0.4);
+    }
+    .ff-sniper-leader-btn:active {
+      background: rgba(255,193,7,0.6);
+    }
+    .ff-sniper-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 10px;
+      background: rgba(0,0,0,0.3);
+      cursor: grab;
+      user-select: none;
+    }
+    .ff-sniper-header:active {
+      cursor: grabbing;
+    }
+    .ff-sniper-header:hover {
+      background: rgba(255,255,255,0.05);
+    }
+    .ff-sniper-title {
+      font-weight: 600;
+      color: #4fc3f7;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+    }
+    .ff-sniper-badge {
+      background: #4caf50;
+      color: #fff;
+      font-size: 10px;
+      padding: 2px 6px;
+      border-radius: 8px;
+      font-weight: 700;
+      min-width: 16px;
+      text-align: center;
+    }
+    .ff-sniper-badge.empty {
+      background: #666;
+    }
+    .ff-sniper-toggle {
+      font-size: 12px;
+      color: #888;
+      padding: 6px 8px;
+      margin: -6px -8px;
+      cursor: pointer;
+      min-width: 32px;
+      min-height: 32px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .ff-sniper-toggle:hover {
+      color: #fff;
+    }
+    .ff-sniper-list {
+      max-height: 160px;
+      overflow-y: auto;
+      overflow-x: hidden;
+    }
+    .ff-sniper-item {
+      display: flex;
+      align-items: center;
+      padding: 6px 10px;
+      border-bottom: 1px solid rgba(255,255,255,0.05);
+      gap: 6px;
+    }
+    .ff-sniper-item:last-child {
+      border-bottom: none;
+    }
+    .ff-sniper-item:hover {
+      background: rgba(255,255,255,0.05);
+    }
+    .ff-sniper-rsi {
+      font-size: 10px;
+      padding: 2px 4px;
+      border-radius: 3px;
+      font-weight: 600;
+      min-width: 32px;
+      text-align: center;
+      flex-shrink: 0;
+    }
+    .ff-sniper-rsi.low { background: rgba(76,175,80,0.3); color: #81c784; }
+    .ff-sniper-rsi.med { background: rgba(255,193,7,0.3); color: #ffd54f; }
+    .ff-sniper-rsi.high { background: rgba(198,40,40,0.3); color: #ef5350; }
+    .ff-sniper-name {
+      flex: 1;
+      min-width: 0;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      font-size: 11px;
+    }
+    .ff-sniper-name a {
+      color: #e0e0e0;
+      text-decoration: none;
+    }
+    .ff-sniper-name a:hover {
+      color: #4fc3f7;
+    }
+    .ff-sniper-reward {
+      font-size: 10px;
+      color: #81c784;
+      font-weight: 600;
+      flex-shrink: 0;
+    }
+    .ff-sniper-beaten {
+      font-size: 9px;
+      color: #ffd700;
+      flex-shrink: 0;
+    }
+    .ff-sniper-atk {
+      background: #c62828;
+      color: #fff;
+      font-size: 9px;
+      padding: 3px 6px;
+      border-radius: 3px;
+      text-decoration: none;
+      font-weight: 600;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+    .ff-sniper-atk:hover {
+      background: #e53935;
+    }
+    .ff-sniper-status {
+      padding: 5px 10px;
+      font-size: 9px;
+      color: #888;
+      text-align: center;
+      border-top: 1px solid rgba(255,255,255,0.05);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .ff-sniper-status .leader {
+      color: #81c784;
+    }
+    .ff-sniper-status .follower {
+      color: #ffd54f;
+    }
+    
+    /* Mobile-specific adjustments */
+    @media (max-width: 768px) {
+      .ff-sniper-panel {
+        width: 220px;
+        bottom: 70px;
+        left: 10px;
+      }
+      .ff-sniper-item {
+        padding: 8px 10px;
+      }
+      .ff-sniper-atk {
+        padding: 5px 8px;
+        font-size: 10px;
+      }
+      .ff-sniper-toggle {
+        min-width: 40px;
+        min-height: 40px;
+      }
+    }
 
     .ff-modal-backdrop {
       position: fixed;
@@ -360,6 +602,16 @@
       box-shadow: 0 0 6px rgba(255, 179, 0, 0.45);
     }
 
+    /* BOUNTY PAGE SPECIFIC - tighter spacing for smaller cells */
+    li[data-ff-bounty="1"] .ff-travel-icon,
+    li[data-ff-bounty="1"] .ff-hospital-icon {
+      top: 2px;
+    }
+    li[data-ff-bounty="1"] .ff-countdown-chip,
+    li[data-ff-bounty="1"] .ff-loc-badge {
+      bottom: 2px;
+    }
+
     /* API warning banner */
     #ff-api-warning {
       position: fixed;
@@ -400,6 +652,110 @@
     #ff-exp-panel .ff-mini-btn:hover { background: rgba(255, 255, 255, 0.14); }
     #ff-exp-panel .ff-note { opacity: 0.8; font-size: 11px; margin-left: 6px; }
 
+    /* Fight Intelligence Panel */
+    #ff-intel-panel {
+      margin-top: 8px;
+      background: linear-gradient(135deg, rgba(30,30,40,0.95) 0%, rgba(20,20,30,0.95) 100%);
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 8px;
+      padding: 12px 14px;
+      color: #e6e6e6;
+      font-size: 12px;
+    }
+    #ff-intel-panel .ff-intel-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 10px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid rgba(255,255,255,0.1);
+    }
+    #ff-intel-panel .ff-intel-title {
+      font-weight: 600;
+      font-size: 13px;
+      color: #4fc3f7;
+    }
+    #ff-intel-panel .ff-intel-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 6px 0;
+      border-bottom: 1px solid rgba(255,255,255,0.05);
+    }
+    #ff-intel-panel .ff-intel-row:last-child {
+      border-bottom: none;
+    }
+    #ff-intel-panel .ff-intel-label {
+      color: #aaa;
+      font-size: 11px;
+    }
+    #ff-intel-panel .ff-intel-value {
+      font-weight: 600;
+      font-size: 13px;
+    }
+    #ff-intel-panel .ff-intel-value.positive { color: #4caf50; }
+    #ff-intel-panel .ff-intel-value.warning { color: #f9a825; }
+    #ff-intel-panel .ff-intel-value.danger { color: #ef5350; }
+    #ff-intel-panel .ff-intel-value.neutral { color: #90a4ae; }
+    #ff-intel-panel .ff-win-chance-bar {
+      width: 100%;
+      height: 8px;
+      background: rgba(255,255,255,0.1);
+      border-radius: 4px;
+      overflow: hidden;
+      margin-top: 4px;
+    }
+    #ff-intel-panel .ff-win-chance-fill {
+      height: 100%;
+      border-radius: 4px;
+      transition: width 0.3s ease;
+    }
+    #ff-intel-panel .ff-history-tag {
+      display: inline-block;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 600;
+      margin-right: 4px;
+    }
+    #ff-intel-panel .ff-history-tag.win {
+      background: rgba(76, 175, 80, 0.2);
+      color: #4caf50;
+      border: 1px solid rgba(76, 175, 80, 0.3);
+    }
+    #ff-intel-panel .ff-history-tag.loss {
+      background: rgba(239, 83, 80, 0.2);
+      color: #ef5350;
+      border: 1px solid rgba(239, 83, 80, 0.3);
+    }
+    #ff-intel-panel .ff-no-data {
+      color: #666;
+      font-style: italic;
+      text-align: center;
+      padding: 8px;
+    }
+    #ff-intel-panel .ff-confidence {
+      display: inline-block;
+      padding: 1px 5px;
+      border-radius: 3px;
+      font-size: 10px;
+      margin-left: 6px;
+      background: rgba(255,255,255,0.1);
+      color: #888;
+    }
+    #ff-intel-panel .ff-confidence.high {
+      background: rgba(76, 175, 80, 0.15);
+      color: #81c784;
+    }
+    #ff-intel-panel .ff-confidence.medium {
+      background: rgba(255, 193, 7, 0.15);
+      color: #ffd54f;
+    }
+    #ff-intel-panel .ff-confidence.low {
+      background: rgba(158, 158, 158, 0.15);
+      color: #9e9e9e;
+    }
+
     /* Anti-overlap utility */
     .ff-anti-overlap {
       z-index: 2147483647 !important;
@@ -439,16 +795,21 @@
       border-collapse: collapse;
       margin: 12px 0;
       font-size: 0.85em;
+      color: #e0e0e0;
     }
     .ff-calibration-table th,
     .ff-calibration-table td {
       padding: 6px 8px;
       text-align: center;
       border-bottom: 1px solid rgba(255,255,255,0.1);
+      color: #e0e0e0;
     }
     .ff-calibration-table th {
       color: #aaa;
       font-weight: 600;
+    }
+    .ff-calibration-table td {
+      color: #ccc;
     }
     .ff-recent-fights {
       max-height: 200px;
@@ -462,9 +823,13 @@
       padding: 6px 8px;
       border-bottom: 1px solid rgba(255,255,255,0.05);
       font-size: 0.85em;
+      color: #ccc;
     }
     .ff-fight-row:hover {
       background: rgba(255,255,255,0.03);
+    }
+    .ff-fight-row span {
+      color: #ccc;
     }
     .ff-fight-win { color: #4caf50; }
     .ff-fight-loss { color: #c62828; }
@@ -524,9 +889,27 @@
    */
   function getGymMultiplier(xanCount) {
     const energy = xanCount * 250;
+    
+    // Last real gym tier values
+    const LAST_TIER_ENERGY = 106305;
+    const LAST_TIER_MUL = 3.45;
+    
+    // If beyond last gym tier, use logarithmic scaling
+    if (energy > LAST_TIER_ENERGY) {
+      const extraEnergy = energy - LAST_TIER_ENERGY;
+      // Logarithmic growth: every ~10x increase in extra energy adds ~1.0 to multiplier
+      // This means someone with 10x more training beyond max gym gets ~1.0 higher multiplier
+      const extraBonus = Math.log10(extraEnergy / 10000 + 1) * 1.0;
+      const result = LAST_TIER_MUL + extraBonus;
+      return result;
+    }
+    
+    // Within gym tiers, use the tier lookup
     let multiplier = 1;
     for (const tier of GYM_TIERS) {
-      if (energy >= tier.energy) multiplier = tier.mul;
+      if (energy >= tier.energy && tier.energy <= LAST_TIER_ENERGY) {
+        multiplier = tier.mul;
+      }
     }
     return multiplier;
   }
@@ -983,6 +1366,114 @@
       }
     }
 
+    /**
+     * Gets win rate for a specific RSI value (finds the appropriate bucket)
+     * Returns: { winRate, totalFights, wins, losses, confidence }
+     */
+    async function getWinRateForRSI(rsiValue) {
+      const fights = await getAllFights();
+      
+      // Find fights in a range around this RSI (±15%)
+      const margin = 15;
+      const lower = rsiValue - margin;
+      const upper = rsiValue + margin;
+      
+      let wins = 0, losses = 0, total = 0;
+      
+      for (const fight of fights) {
+        const rsi = fight.rsiAdjusted || fight.rsiRaw;
+        if (rsi === null || rsi === undefined) continue;
+        
+        if (rsi >= lower && rsi < upper) {
+          total++;
+          if (fight.outcome === 'win') wins++;
+          else if (fight.outcome === 'loss') losses++;
+        }
+      }
+      
+      // Determine confidence level
+      let confidence = 'none';
+      if (total >= 20) confidence = 'high';
+      else if (total >= 10) confidence = 'medium';
+      else if (total >= 3) confidence = 'low';
+      
+      return {
+        winRate: total > 0 ? (wins / total) * 100 : null,
+        totalFights: total,
+        wins,
+        losses,
+        confidence,
+        rsiRange: `${Math.round(lower)}-${Math.round(upper)}%`
+      };
+    }
+
+    /**
+     * Auto-update learned RSI parameters when a fight is logged
+     * Uses online logistic regression update
+     */
+    function updateLearnedRSI(rsiValue, isWin) {
+      try {
+        // Get current parameters
+        let theta0 = Number(Env.getValue('ff_lrsi_theta0', 0));
+        let theta1 = Number(Env.getValue('ff_lrsi_theta1', 0.12));
+        let hist = Env.getValue('ff_lrsi_hist', []) || [];
+        
+        // Add to history
+        const xRaw = rsiValue - 100; // Center around 100%
+        const y = isWin ? 1 : 0;
+        hist.push({ x: xRaw, y, ts: Date.now() });
+        
+        // Keep only last 500 entries
+        if (hist.length > 500) {
+          hist = hist.slice(-500);
+        }
+        
+        // Perform gradient descent update (learning rate = 0.01)
+        const lr = 0.01;
+        const pWin = 1 / (1 + Math.exp(-(theta0 + theta1 * xRaw)));
+        const error = y - pWin;
+        
+        theta0 += lr * error;
+        theta1 += lr * error * xRaw;
+        
+        // Clamp theta1 to reasonable bounds
+        theta1 = Math.max(0.01, Math.min(0.5, theta1));
+        
+        // Save updated parameters
+        Env.setValue('ff_lrsi_theta0', theta0);
+        Env.setValue('ff_lrsi_theta1', theta1);
+        Env.setValue('ff_lrsi_hist', hist);
+        Env.setValue('ff_lrsi_meta', { n: hist.length, ts: Date.now() });
+        
+        console.log(`Win Chance model updated: θ0=${theta0.toFixed(4)}, θ1=${theta1.toFixed(4)}, n=${hist.length}`);
+        
+        return { theta0, theta1, historyLength: hist.length };
+      } catch (e) {
+        console.error('FightDB: Error updating learned RSI', e);
+        return null;
+      }
+    }
+
+    /**
+     * Gets learned RSI win probability for a given RSI value
+     */
+    function getLearnedWinProbability(rsiValue) {
+      const theta0 = Number(Env.getValue('ff_lrsi_theta0', 0));
+      const theta1 = Number(Env.getValue('ff_lrsi_theta1', 0.12));
+      const hist = Env.getValue('ff_lrsi_hist', []) || [];
+      
+      const xRaw = rsiValue - 100;
+      const pWin = 1 / (1 + Math.exp(-(theta0 + theta1 * xRaw)));
+      
+      return {
+        probability: pWin * 100,
+        theta0,
+        theta1,
+        dataPoints: hist.length,
+        confidence: hist.length >= 50 ? 'high' : hist.length >= 20 ? 'medium' : hist.length >= 5 ? 'low' : 'none'
+      };
+    }
+
     return {
       logFight,
       getAllFights,
@@ -993,7 +1484,10 @@
       getOverallStats,
       exportData,
       clearAllData,
-      isAvailable
+      isAvailable,
+      getWinRateForRSI,
+      updateLearnedRSI,
+      getLearnedWinProbability
     };
   })();
 
@@ -1321,6 +1815,15 @@
       try {
         await FightDB.logFight(fightRecord);
         clearPendingAttack();
+        
+        // Auto-update learned RSI if we have RSI data
+        if (fightRecord.rsiAdjusted || fightRecord.rsiRaw) {
+          const rsiValue = fightRecord.rsiAdjusted || fightRecord.rsiRaw;
+          const isWin = outcome === 'win';
+          FightDB.updateLearnedRSI(rsiValue, isWin);
+          console.log('FightCapture: Auto-updated Win Chance model with', { rsiValue, isWin });
+        }
+        
         showNotification(`📊 Fight logged: ${outcome.toUpperCase()}`);
         console.log('FightCapture: Successfully logged fight', fightRecord);
       } catch (e) {
@@ -1696,6 +2199,14 @@
 
     // Start injection after user state is ready
     ObserverManager.start();
+
+    // Start Bounty Sniper if enabled
+    if (settings.sniperEnabled && API_KEY) {
+      // Small delay to let page settle
+      setTimeout(() => {
+        BountySniper.start();
+      }, 2000);
+    }
   }
 
   // ============================================================================
@@ -1751,7 +2262,7 @@
       const boost = wp * settings.lifeWeight * fair;
       const adj = raw * (1 + boost);
 
-      // Learned RSI (beta): logistic regression
+      // Win Chance model: logistic regression on RSI
       let theta0 = Number(Env.getValue('ff_lrsi_theta0', 0));
       let theta1 = Number(Env.getValue('ff_lrsi_theta1', 0.12));
       const xRaw = raw - 100;
@@ -1768,8 +2279,8 @@
       wrap.style.cssText = 'margin-top:6px;background:rgba(0,0,0,0.25);border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:8px 10px;color:#e6e6e6;';
 
       const summary = document.createElement('summary');
-      summary.textContent = 'RSI+ (Experimental) — breakdown & drivers';
-      summary.style.cssText = 'cursor:pointer;color:#e6e6e6;font-weight:600;';
+      summary.textContent = 'RSI+ Details';
+      summary.style.cssText = 'cursor:pointer;color:#e6e6e6;font-weight:600;font-size:12px;';
       wrap.appendChild(summary);
 
       const div = document.createElement('div');
@@ -1777,11 +2288,11 @@
         <div style="margin-top:6px;font-size:12px;line-height:1.35">
           <div style="margin-bottom:6px;">
             <b>Adjusted RSI:</b> ${adj.toFixed(2)}%
-            <span style="margin-left:10px;"><b>Learned RSI (beta):</b> <span id="ff-lrsi-value">${(pWin * 100).toFixed(1)}%</span></span>
+            <span style="margin-left:10px;"><b>Win Chance (Learned):</b> <span id="ff-lrsi-value">${(pWin * 100).toFixed(1)}%</span></span>
             <span id="ff-lrsi-msg" class="ff-note"></span>
           </div>
           <div class="ff-lrsi-controls">
-            <b>Learned RSI controls:</b>
+            <b>Learning controls:</b>
             θ<sub>0</sub>=<span id="ff-theta0"></span>, θ<sub>1</sub>=<span id="ff-theta1"></span>
             <span class="ff-note" id="ff-lrsi-n"></span>
             <span class="ff-mini-btn" id="ff-softer">Softer</span>
@@ -1935,11 +2446,48 @@
       flash('reset');
     });
 
-    wrap.querySelector('#ff-refit')?.addEventListener('click', () => {
-      const cur = load();
-      const fitted = refit(cur.hist);
-      refreshAll();
-      flash(fitted ? `re-fit: θ0=${fitted.t0.toFixed(3)}, θ1=${fitted.t1.toFixed(3)}` : 'no samples');
+    wrap.querySelector('#ff-refit')?.addEventListener('click', async () => {
+      try {
+        // Pull fights from IndexedDB instead of old manual log
+        const fights = await FightDB.getAllFights();
+        
+        if (!fights || fights.length === 0) {
+          flash('no fights in database');
+          return;
+        }
+        
+        // Convert fights to learning format
+        const samples = [];
+        for (const fight of fights) {
+          const rsi = fight.rsiAdjusted || fight.rsiRaw;
+          if (rsi === null || rsi === undefined) continue;
+          if (fight.outcome !== 'win' && fight.outcome !== 'loss') continue;
+          
+          samples.push({
+            x: rsi - 100, // Center around 100%
+            y: fight.outcome === 'win' ? 1 : 0,
+            ts: fight.capturedAt || Date.now()
+          });
+        }
+        
+        if (samples.length === 0) {
+          flash('no fights with RSI data');
+          return;
+        }
+        
+        // Refit using the converted samples
+        const fitted = refit(samples);
+        
+        // Also save samples to the learning history
+        Env.setValue('ff_lrsi_hist', samples);
+        Env.setValue('ff_lrsi_meta', { n: samples.length, ts: Date.now() });
+        
+        refreshAll();
+        flash(fitted ? `re-fit from ${samples.length} fights: θ0=${fitted.t0.toFixed(3)}, θ1=${fitted.t1.toFixed(3)}` : 'fit failed');
+      } catch (e) {
+        console.error('Re-fit error:', e);
+        flash('error: ' + e.message);
+      }
     });
 
     wrap.querySelector('#ff-clear')?.addEventListener('click', () => {
@@ -1961,6 +2509,190 @@
   }
 
   // ============================================================================
+  // FIGHT INTELLIGENCE PANEL
+  // ============================================================================
+
+  async function buildFightIntelPanel(headerEl, opponentId, opponentName, currentRSI) {
+    try {
+      // Don't duplicate
+      if (document.getElementById('ff-intel-panel')) return;
+      
+      // Get data from database
+      const [opponentHistory, winRateData, learnedData] = await Promise.all([
+        FightDB.getOpponentHistory(opponentId),
+        FightDB.getWinRateForRSI(currentRSI),
+        Promise.resolve(FightDB.getLearnedWinProbability(currentRSI))
+      ]);
+      
+      // Calculate opponent-specific stats
+      const oppWins = opponentHistory.filter(f => f.outcome === 'win').length;
+      const oppLosses = opponentHistory.filter(f => f.outcome === 'loss').length;
+      const oppTotal = opponentHistory.length;
+      
+      // Determine win chance data
+      const hasLearnedData = learnedData.dataPoints >= 5;
+      const hasHistoricalData = winRateData.totalFights >= 3;
+      
+      let winChance = null;
+      let confidenceClass = 'none';
+      let confidenceShort = '';
+      
+      if (hasLearnedData && learnedData.confidence !== 'none') {
+        winChance = learnedData.probability;
+        confidenceClass = learnedData.confidence;
+        confidenceShort = learnedData.confidence === 'high' ? '✓' : learnedData.confidence === 'medium' ? '📊' : '⚠️';
+      } else if (hasHistoricalData) {
+        winChance = winRateData.winRate;
+        confidenceClass = winRateData.confidence;
+        confidenceShort = winRateData.confidence === 'high' ? '✓' : winRateData.confidence === 'medium' ? '📊' : '⚠️';
+      }
+      
+      // Build summary line for collapsed state
+      let summaryParts = [];
+      
+      // Win chance summary
+      if (winChance !== null) {
+        const wcColor = winChance >= 70 ? '#4caf50' : winChance >= 50 ? '#f9a825' : '#ef5350';
+        summaryParts.push(`<span style="color:${wcColor};font-weight:600;">${winChance.toFixed(0)}%</span> win ${confidenceShort}`);
+      } else {
+        summaryParts.push('<span style="color:#666;">No prediction</span>');
+      }
+      
+      // Opponent history summary
+      if (oppTotal > 0) {
+        const histColor = oppWins > oppLosses ? '#4caf50' : oppLosses > oppWins ? '#ef5350' : '#90a4ae';
+        summaryParts.push(`<span style="color:${histColor};">${oppWins}W-${oppLosses}L</span> vs ${escapeHtml(opponentName || 'them')}`);
+      } else {
+        summaryParts.push(`<span style="color:#666;">Never fought</span>`);
+      }
+      
+      // Create collapsible panel
+      const panel = document.createElement('details');
+      panel.id = 'ff-intel-panel';
+      panel.style.cssText = 'margin-top:6px;background:linear-gradient(135deg,rgba(30,30,40,0.92) 0%,rgba(20,20,30,0.92) 100%);border:1px solid rgba(255,255,255,0.1);border-radius:6px;font-size:12px;color:#e6e6e6;';
+      
+      // Summary header (always visible)
+      const summary = document.createElement('summary');
+      summary.style.cssText = 'padding:8px 12px;cursor:pointer;display:flex;align-items:center;gap:8px;user-select:none;list-style:none;';
+      summary.innerHTML = `
+        <span style="color:#4fc3f7;font-weight:600;">⚔️ Intel</span>
+        <span style="color:#888;">—</span>
+        ${summaryParts.join(' <span style="color:#444;margin:0 4px;">·</span> ')}
+      `;
+      panel.appendChild(summary);
+      
+      // Expanded content container
+      const content = document.createElement('div');
+      content.style.cssText = 'padding:0 12px 10px 12px;border-top:1px solid rgba(255,255,255,0.08);';
+      
+      let contentHtml = '';
+      
+      // Win Chance Section (only if data exists)
+      if (winChance !== null) {
+        let valueClass = winChance >= 70 ? 'positive' : winChance >= 50 ? 'warning' : 'danger';
+        let barColor = winChance >= 70 ? '#4caf50' : winChance >= 50 ? '#f9a825' : '#ef5350';
+        
+        let confidenceNote = '';
+        if (confidenceClass === 'low') {
+          confidenceNote = '⚠️ Low confidence — need more fights';
+        } else if (confidenceClass === 'medium') {
+          confidenceNote = '📊 Medium confidence';
+        } else if (confidenceClass === 'high') {
+          confidenceNote = '✓ High confidence';
+        }
+        
+        const dataPointsLabel = hasLearnedData ? `${learnedData.dataPoints} fights` : `${winRateData.totalFights} similar`;
+        
+        contentHtml += `
+          <div style="padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.05);">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+              <span style="color:#aaa;font-size:11px;">Est. Win Chance</span>
+              <span style="font-weight:600;color:${barColor};">${winChance.toFixed(1)}%</span>
+            </div>
+            <div style="width:100%;height:6px;background:rgba(255,255,255,0.1);border-radius:3px;overflow:hidden;">
+              <div style="height:100%;width:${Math.min(winChance, 100)}%;background:${barColor};border-radius:3px;"></div>
+            </div>
+            <div style="display:flex;justify-content:space-between;margin-top:4px;font-size:10px;color:#666;">
+              <span>${dataPointsLabel}</span>
+              <span>${confidenceNote}</span>
+            </div>
+          </div>
+        `;
+      }
+      
+      // Historical Win Rate (only show if different from learned data source AND has data)
+      if (hasHistoricalData && hasLearnedData) {
+        let wrColor = winRateData.winRate >= 70 ? '#4caf50' : winRateData.winRate >= 50 ? '#f9a825' : '#ef5350';
+        contentHtml += `
+          <div style="padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.05);display:flex;justify-content:space-between;align-items:center;">
+            <span style="color:#aaa;font-size:11px;">At RSI ${winRateData.rsiRange}</span>
+            <span style="color:${wrColor};font-weight:600;">${winRateData.wins}W ${winRateData.losses}L</span>
+          </div>
+        `;
+      }
+      
+      // Opponent History Section (only if fought before)
+      if (oppTotal > 0) {
+        let recordColor = oppWins > oppLosses ? '#4caf50' : oppLosses > oppWins ? '#ef5350' : '#90a4ae';
+        
+        const recentFights = opponentHistory
+          .sort((a, b) => (b.capturedAt || 0) - (a.capturedAt || 0))
+          .slice(0, 5);
+        
+        let tagsHtml = recentFights.map(f => {
+          const cls = f.outcome === 'win' ? 'background:rgba(76,175,80,0.2);color:#4caf50;border:1px solid rgba(76,175,80,0.3);' 
+                    : f.outcome === 'loss' ? 'background:rgba(239,83,80,0.2);color:#ef5350;border:1px solid rgba(239,83,80,0.3);' 
+                    : 'background:rgba(158,158,158,0.2);color:#9e9e9e;';
+          const txt = f.outcome === 'win' ? 'W' : f.outcome === 'loss' ? 'L' : '?';
+          return `<span style="display:inline-block;padding:1px 5px;border-radius:3px;font-size:10px;font-weight:600;${cls}">${txt}</span>`;
+        }).join('');
+        
+        let lastFightInfo = '';
+        if (recentFights[0]) {
+          const timeAgo = formatTimeAgo(recentFights[0].capturedAt);
+          lastFightInfo = `<span style="font-size:10px;color:#666;margin-left:8px;">Last: ${timeAgo}</span>`;
+        }
+        
+        contentHtml += `
+          <div style="padding:8px 0;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+              <span style="color:#aaa;font-size:11px;">vs ${escapeHtml(opponentName || 'this player')}</span>
+              <span style="color:${recordColor};font-weight:600;">${oppWins}W - ${oppLosses}L</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:4px;">
+              ${tagsHtml}
+              ${lastFightInfo}
+            </div>
+          </div>
+        `;
+      }
+      
+      // If no meaningful expanded content, show a minimal message
+      if (!contentHtml) {
+        contentHtml = `
+          <div style="padding:10px 0;text-align:center;color:#666;font-style:italic;">
+            Fight opponents to build intelligence data
+          </div>
+        `;
+      }
+      
+      content.innerHTML = contentHtml;
+      panel.appendChild(content);
+      
+      // Insert after the h4 header (or after RSI+ panel if it exists)
+      const rsiPlusPanel = document.getElementById('ff-exp-panel');
+      if (rsiPlusPanel) {
+        rsiPlusPanel.after(panel);
+      } else {
+        headerEl.after(panel);
+      }
+      
+    } catch (e) {
+      console.error('FightIntel: Error building panel', e);
+    }
+  }
+
+  // ============================================================================
   // INJECTION FUNCTIONS
   // ============================================================================
 
@@ -1973,7 +2705,7 @@
     const userId = match?.[1];
     if (!userId) return;
 
-    ApiManager.get(`/user/${userId}?selections=personalstats,basic,profile`, o => {
+    ApiManager.get(`/user/${userId}?selections=personalstats,basic,profile`, async (o) => {
       const rsi = calcRSI(USER_BP, o.personalstats, o.basic, o.life);
       const pct = parseFloat(rsi.adjusted.toFixed(2));
 
@@ -2033,6 +2765,9 @@
 
       window.__FF_LAST_PROFILE_OBJ = o;
       buildRSIPlusPanel(h, ME_STATS, o);
+      
+      // Build Fight Intelligence panel
+      buildFightIntelPanel(h, parseInt(userId, 10), o.name || o.basic?.name, pct);
     });
   }
 
@@ -2297,6 +3032,84 @@
   }
 
   // ============================================================================
+  // BOUNTY PAGE INJECTION
+  // ============================================================================
+
+  function injectBountyItem(listItem) {
+    if (listItem.getAttribute('data-ff-bounty') === '1') return;
+    listItem.setAttribute('data-ff-bounty', '1');
+
+    // Find the profile link (target name)
+    const profileLink = listItem.querySelector('a[href*="profiles.php?XID="]');
+    if (!profileLink) return;
+
+    const userIdMatch = profileLink.href.match(/XID=(\d+)/);
+    if (!userIdMatch) return;
+    const userId = userIdMatch[1];
+
+    // Find the cell/container that holds the name - this becomes our positioning parent
+    // On bounty page, the structure is: li > div.target_left > a
+    let container = profileLink.parentElement;
+    
+    // Make container a positioning context (like honor-text-wrap on faction pages)
+    container.style.position = 'relative';
+    container.style.overflow = 'visible';
+
+    ApiManager.get(`/user/${userId}?selections=personalstats,basic,profile`, d => {
+      if (!d) return;
+
+      // Clear existing indicators from this container
+      container.querySelectorAll('.ff-list-arrow-img, .ff-travel-icon, .ff-hospital-icon, .ff-loc-badge, .ff-countdown-chip')
+        .forEach(el => el.remove());
+
+      const rsi = calcRSI(USER_BP, d.personalstats, d.basic, d.life);
+      const pct = parseFloat(rsi.adjusted.toFixed(2));
+
+      const cls = rsi.adjusted < settings.lowHigh ? 'high'
+        : rsi.adjusted < settings.highMed ? 'med'
+        : 'low';
+
+      // Position on 0-200% scale (same as faction pages)
+      const pos = (100 - Math.min(rsi.adjusted, 200) / 200 * 100) + '%';
+
+      const lifePct = d.life?.maximum
+        ? Math.round((d.life.current / d.life.maximum) * 100)
+        : null;
+
+      const lastAction = d.last_action || d.profile?.last_action || d.basic?.last_action;
+
+      // Build tooltip
+      let tooltipHtml = `RSI: ${escapeHtml(pct.toFixed(2))}%`;
+      if (lifePct !== null) tooltipHtml += `<br>Life: ${escapeHtml(String(lifePct))}%`;
+      if (d.status?.description) tooltipHtml += `<br>Status: ${escapeHtml(d.status.description)}`;
+      if (lastAction?.relative) tooltipHtml += `<br>Last action: ${escapeHtml(lastAction.relative)}`;
+
+      // Create triangle indicator using same class as faction pages (.ff-list-arrow-img)
+      const img = document.createElement('img');
+      img.className = 'ff-list-arrow-img';
+      img.style.left = pos;
+      img.src = cls === 'low' ? GREEN_ARROW_UP : cls === 'med' ? YELLOW_ARROW_UP : RED_ARROW_UP;
+      img.setAttribute('width', '20');
+      img.setAttribute('height', '20');
+      if (rsi.woundPenalty > 0) img.classList.add('wounded');
+
+      img.addEventListener('mouseenter', e => Tooltip.show(e.pageX, e.pageY, tooltipHtml));
+      img.addEventListener('mousemove', e => Tooltip.show(e.pageX, e.pageY, tooltipHtml));
+      img.addEventListener('mouseleave', () => Tooltip.hide());
+      img.addEventListener('click', e => {
+        e.preventDefault();
+        Tooltip.show(e.pageX, e.pageY, tooltipHtml);
+        setTimeout(Tooltip.hide, 2000);
+      });
+
+      container.appendChild(img);
+
+      // Add status icons using the SAME function as faction pages
+      addStatusIcon(d, container, userId);
+    });
+  }
+
+  // ============================================================================
   // MARKET ATTACK BUTTONS
   // ============================================================================
 
@@ -2331,6 +3144,2434 @@
   }
 
   // ============================================================================
+  // BOUNTY SNIPER MODULE
+  // With cross-tab sync, draggable panel, and mobile optimization
+  // ============================================================================
+
+  const BountySniper = (() => {
+    // State
+    let isEnabled = false;
+    let targets = [];  // Current sniper targets (shown in panel)
+    let rsiCache = new Map();  // userId -> {rsi, timestamp}
+    let beatenCache = new Map();  // userId -> {wins, losses}
+    let apiCallsThisMinute = 0;
+    let lastMinuteReset = Date.now();
+    let scanInterval = null;
+    let heartbeatInterval = null;
+    let panelEl = null;
+    let isCollapsed = false;
+    
+    // Progressive scanning state
+    let cachedBounties = [];  // Full bounty list from page scraping
+    let cachedCandidates = [];  // Filtered candidates awaiting API check
+    let lastBountyFetch = 0;  // Timestamp of last bounty page fetch
+    let scanIndex = 0;  // Current position in candidate list
+    let verifiedTargets = new Map();  // userId -> bounty object (API-verified good targets)
+
+    // Target verification
+    let targetLastVerified = new Map();  // userId -> timestamp
+    
+    // Cross-tab sync state
+    const TAB_ID = Math.random().toString(36).substr(2, 9);
+    let isLeader = false;
+    let isProvisionalFollower = true;  // New pages start as provisional followers
+    const LEADER_TIMEOUT = 5000;  // 5 seconds without heartbeat = leader lost
+    const HEARTBEAT_INTERVAL = 2000;  // Send heartbeat every 2 seconds
+    const VISIBILITY_TAKEOVER_TIME = 10000;  // Take leadership after 10 seconds of viewing (PC)
+    const LEADERSHIP_CLAIM_DELAY = 15000;  // Wait 15 seconds before claiming leadership (mobile-friendly)
+    const STORAGE_KEY_TARGETS = 'ff_sniper_targets';
+    const STORAGE_KEY_LEADER = 'ff_sniper_leader';
+    const STORAGE_KEY_HEARTBEAT = 'ff_sniper_heartbeat';
+    const STORAGE_KEY_POSITION = 'ff_sniper_position';
+    const STORAGE_KEY_COLLAPSED = 'ff_sniper_collapsed';
+    const STORAGE_KEY_SCAN_STATE = 'ff_sniper_scan_state';
+    const STORAGE_KEY_FORCE_LEADER = 'ff_sniper_force_leader';  // For forced takeover
+    const STORAGE_KEY_FULL_STATE = 'ff_sniper_full_state';  // Comprehensive state for mobile
+    const STORAGE_KEY_NAVIGATING = 'ff_sniper_navigating';  // Navigation detection
+    
+    // Mobile/PDA detection
+    const isMobilePDA = /PDA|Android|iPhone|iPad|Mobile/i.test(navigator.userAgent) 
+                        || window.innerWidth < 768;
+    
+    // Visibility tracking
+    let visibilityStartTime = 0;
+    let visibilityCheckInterval = null;
+    let panelCreated = false;  // Prevent duplicate panels
+    let leadershipClaimTimer = null;  // Delayed leadership claim
+    let receivedUpdatesDuringDelay = false;  // Track if we got updates while waiting
+    
+    // Watchdog / reconnection handling
+    let watchdogInterval = null;
+    let lastActivityTime = Date.now();
+    const WATCHDOG_INTERVAL = 30000;  // Check every 30 seconds
+    const WATCHDOG_TIMEOUT = 120000;  // Restart if no activity for 2 minutes
+    
+    // Drag state
+    let isDragging = false;
+    let dragStartX = 0;
+    let dragStartY = 0;
+    let panelStartX = 0;
+    let panelStartY = 0;
+
+    const RSI_CACHE_TTL = 10 * 60 * 1000;  // 10 minutes for general cache
+    const TARGET_VERIFY_TTL = 45 * 1000;  // 45 seconds - verify panel targets frequently
+    const BOUNTY_REFRESH_INTERVAL = 90 * 1000;  // Refresh bounty pages every 90 seconds
+    const MAX_TARGETS = 5;
+    
+    // Throttling constants - slower to reduce load
+    const PAGE_LOAD_DELAY = 2500;  // 2.5 seconds between page loads (was 1.5s)
+    const API_CALL_DELAY = 200;    // 200ms between API calls (was 100ms)
+
+    // Check if a page-scraped status matches user's enabled preferences
+    function statusMatchesPrefs(status) {
+      if (status === 'Okay' && settings.sniperShowOkay) return true;
+      if (status === 'Hospital' && settings.sniperShowHospital) return true;
+      if (status === 'Traveling' && settings.sniperShowTraveling) return true;
+      return false;
+    }
+
+    // =========================================================================
+    // CROSS-TAB SYNC
+    // =========================================================================
+
+    // Try to become leader
+    function tryBecomeLeader() {
+      const now = Date.now();
+      const lastHeartbeat = parseInt(localStorage.getItem(STORAGE_KEY_HEARTBEAT) || '0', 10);
+      const currentLeader = localStorage.getItem(STORAGE_KEY_LEADER);
+      
+      // Become leader if: no leader, leader timed out, or we are already leader
+      if (!currentLeader || currentLeader === TAB_ID || (now - lastHeartbeat) > LEADER_TIMEOUT) {
+        localStorage.setItem(STORAGE_KEY_LEADER, TAB_ID);
+        localStorage.setItem(STORAGE_KEY_HEARTBEAT, now.toString());
+        
+        if (!isLeader) {
+          isLeader = true;
+          console.log(`BountySniper: Tab ${TAB_ID} became LEADER`);
+          restoreScanState();
+          updatePanelRole();
+          
+          // Start scanning if we're not in provisional mode and don't have scan interval
+          if (!isProvisionalFollower && !scanInterval) {
+            console.log('BountySniper: Starting scanning after leadership takeover');
+            startLeaderScanning();
+          }
+        }
+        return true;
+      }
+      
+      if (isLeader) {
+        isLeader = false;
+        updatePanelRole();
+      }
+      return false;
+    }
+
+    // Send leader heartbeat
+    function sendHeartbeat() {
+      if (isLeader) {
+        localStorage.setItem(STORAGE_KEY_HEARTBEAT, Date.now().toString());
+      }
+    }
+
+    // Check if current leader is still alive
+    function checkLeader() {
+      const now = Date.now();
+      const lastHeartbeat = parseInt(localStorage.getItem(STORAGE_KEY_HEARTBEAT) || '0', 10);
+      const currentLeader = localStorage.getItem(STORAGE_KEY_LEADER);
+      
+      if (currentLeader === TAB_ID) {
+        // We are leader, send heartbeat
+        sendHeartbeat();
+        return;
+      }
+      
+      // Check if leader timed out
+      if ((now - lastHeartbeat) > LEADER_TIMEOUT) {
+        console.log('BountySniper: Leader timed out, trying to take over...');
+        tryBecomeLeader();
+      }
+    }
+
+    // Broadcast targets to other tabs
+    function broadcastTargets() {
+      if (!isLeader) return;
+      
+      const data = {
+        targets: targets,
+        timestamp: Date.now(),
+        scanIndex: scanIndex,
+        cachedCandidatesCount: cachedCandidates.length,
+        progress: cachedCandidates.length > 0 ? Math.round((getCheckedCount() / cachedCandidates.length) * 100) : 0
+      };
+      
+      localStorage.setItem(STORAGE_KEY_TARGETS, JSON.stringify(data));
+    }
+
+    // Broadcast scan state for other tabs to continue if they become leader
+    function broadcastScanState() {
+      if (!isLeader) return;
+      
+      const state = {
+        scanIndex,
+        lastBountyFetch,
+        verifiedTargets: Array.from(verifiedTargets.entries()),
+        rsiCache: Array.from(rsiCache.entries()).slice(0, 100)
+      };
+      
+      try {
+        localStorage.setItem(STORAGE_KEY_SCAN_STATE, JSON.stringify(state));
+      } catch (e) {
+        // localStorage full
+        console.log('BountySniper: localStorage full, clearing old scan state');
+      }
+      
+      // Also save full state for mobile navigation
+      saveFullState();
+    }
+
+    // Save comprehensive state (for mobile navigation recovery)
+    function saveFullState() {
+      try {
+        const fullState = {
+          timestamp: Date.now(),
+          targets: targets,
+          scanIndex: scanIndex,
+          lastBountyFetch: lastBountyFetch,
+          verifiedTargets: Array.from(verifiedTargets.entries()),
+          cachedCandidates: cachedCandidates.slice(0, 200),  // Limit size
+          cachedBounties: cachedBounties.slice(0, 200),
+          rsiCache: Array.from(rsiCache.entries()).slice(0, 100),
+          progress: cachedCandidates.length > 0 ? Math.round((getCheckedCount() / cachedCandidates.length) * 100) : 0
+        };
+        localStorage.setItem(STORAGE_KEY_FULL_STATE, JSON.stringify(fullState));
+      } catch (e) {
+        console.log('BountySniper: Could not save full state', e);
+      }
+    }
+
+    // Cleanup stale localStorage data (older than threshold)
+    function cleanupStaleData(threshold) {
+      try {
+        let cleaned = [];
+        
+        // Check targets timestamp
+        const targetsData = JSON.parse(localStorage.getItem(STORAGE_KEY_TARGETS) || '{}');
+        if (targetsData.timestamp && (Date.now() - targetsData.timestamp) > threshold) {
+          localStorage.removeItem(STORAGE_KEY_TARGETS);
+          cleaned.push('targets');
+        }
+        
+        // Check full state timestamp
+        const fullState = JSON.parse(localStorage.getItem(STORAGE_KEY_FULL_STATE) || '{}');
+        if (fullState.timestamp && (Date.now() - fullState.timestamp) > threshold) {
+          localStorage.removeItem(STORAGE_KEY_FULL_STATE);
+          cleaned.push('fullState');
+        }
+        
+        // Check scan state (no timestamp, but clear if leader is stale)
+        const lastHeartbeat = parseInt(localStorage.getItem(STORAGE_KEY_HEARTBEAT) || '0', 10);
+        if ((Date.now() - lastHeartbeat) > threshold) {
+          localStorage.removeItem(STORAGE_KEY_SCAN_STATE);
+          localStorage.removeItem(STORAGE_KEY_LEADER);
+          localStorage.removeItem(STORAGE_KEY_HEARTBEAT);
+          cleaned.push('scanState', 'leader', 'heartbeat');
+        }
+        
+        if (cleaned.length > 0) {
+          console.log(`BountySniper: Cleaned stale data: ${cleaned.join(', ')}`);
+        }
+        
+        return cleaned.length > 0;
+      } catch (e) {
+        console.log('BountySniper: Error cleaning stale data', e);
+        return false;
+      }
+    }
+
+    // Load comprehensive state (for mobile navigation recovery)
+    function loadFullState() {
+      try {
+        const data = JSON.parse(localStorage.getItem(STORAGE_KEY_FULL_STATE) || '{}');
+        
+        // Check if state is fresh (less than 5 minutes old)
+        const stateAge = Date.now() - (data.timestamp || 0);
+        const isFresh = stateAge < 5 * 60 * 1000;  // 5 minutes
+        
+        if (!isFresh) {
+          console.log(`BountySniper: Saved state is stale (${(stateAge/1000/60).toFixed(1)} mins old), starting fresh`);
+          return false;
+        }
+        
+        // Restore targets (for immediate display)
+        if (data.targets && data.targets.length > 0) {
+          targets = data.targets;
+          console.log(`BountySniper: Restored ${targets.length} targets from saved state`);
+        }
+        
+        // Restore scan progress
+        if (data.scanIndex !== undefined) {
+          scanIndex = data.scanIndex;
+        }
+        if (data.lastBountyFetch) {
+          lastBountyFetch = data.lastBountyFetch;
+        }
+        if (data.verifiedTargets) {
+          verifiedTargets = new Map(data.verifiedTargets);
+        }
+        if (data.cachedCandidates && data.cachedCandidates.length > 0) {
+          cachedCandidates = data.cachedCandidates;
+        }
+        if (data.cachedBounties && data.cachedBounties.length > 0) {
+          cachedBounties = data.cachedBounties;
+        }
+        if (data.rsiCache) {
+          rsiCache = new Map(data.rsiCache);
+        }
+        
+        console.log(`BountySniper: Loaded full state - ${targets.length} targets, ${cachedCandidates.length} candidates, progress: ${data.progress || 0}%`);
+        return true;
+      } catch (e) {
+        console.log('BountySniper: Could not load full state', e);
+        return false;
+      }
+    }
+
+    // Mark navigation start (helps new page know we're mid-navigation)
+    function markNavigating() {
+      try {
+        localStorage.setItem(STORAGE_KEY_NAVIGATING, Date.now().toString());
+      } catch (e) {}
+    }
+
+    // Check if we recently navigated (within last 10 seconds)
+    function isRecentNavigation() {
+      try {
+        const navTime = parseInt(localStorage.getItem(STORAGE_KEY_NAVIGATING) || '0', 10);
+        return (Date.now() - navTime) < 10000;
+      } catch (e) {
+        return false;
+      }
+    }
+
+    // Receive targets from leader tab
+    // isStorageEvent = true means this was triggered by another tab, false = initial read
+    function receiveTargets(isStorageEvent = false) {
+      try {
+        const data = JSON.parse(localStorage.getItem(STORAGE_KEY_TARGETS) || '{}');
+        if (data.targets && Array.isArray(data.targets)) {
+          targets = data.targets;
+          
+          // Only mark as "received updates" if this is an actual storage event from another tab
+          // AND the data is fresh (less than 30 seconds old)
+          if (isStorageEvent && data.timestamp && (Date.now() - data.timestamp) < 30000) {
+            receivedUpdatesDuringDelay = true;
+            console.log('BountySniper: Received LIVE update from leader');
+          }
+          
+          renderPanel();
+          updateStatusFromSync(data);
+        }
+      } catch (e) {
+        // Invalid data
+      }
+    }
+
+    // Update status display from synced data
+    function updateStatusFromSync(data) {
+      if (!panelEl) return;
+      const status = panelEl.querySelector('.ff-sniper-status');
+      if (status && data.progress !== undefined) {
+        status.innerHTML = `<span class="follower">●</span> Synced | ${data.progress}% scanned`;
+      }
+    }
+
+    // Restore scan state when becoming leader
+    function restoreScanState() {
+      try {
+        const state = JSON.parse(localStorage.getItem(STORAGE_KEY_SCAN_STATE) || '{}');
+        if (state.scanIndex !== undefined) {
+          scanIndex = state.scanIndex;
+        }
+        if (state.lastBountyFetch) {
+          lastBountyFetch = state.lastBountyFetch;
+        }
+        if (state.verifiedTargets) {
+          verifiedTargets = new Map(state.verifiedTargets);
+        }
+        if (state.rsiCache) {
+          rsiCache = new Map(state.rsiCache);
+        }
+        console.log(`BountySniper: Restored scan state - index: ${scanIndex}, verified: ${verifiedTargets.size}`);
+      } catch (e) {
+        console.log('BountySniper: Could not restore scan state');
+      }
+    }
+
+    // Listen for storage changes (other tabs updating)
+    function setupStorageListener() {
+      window.addEventListener('storage', (e) => {
+        if (e.key === STORAGE_KEY_TARGETS && !isLeader) {
+          receiveTargets(true);  // true = this is a real storage event from another tab
+        }
+        if (e.key === STORAGE_KEY_LEADER) {
+          // Leader changed
+          const newLeader = e.newValue;
+          if (newLeader !== TAB_ID && isLeader) {
+            // We lost leadership
+            isLeader = false;
+            if (scanInterval) {
+              clearInterval(scanInterval);
+              scanInterval = null;
+            }
+            updatePanelRole();
+            console.log(`BountySniper: Tab ${TAB_ID} is now FOLLOWER (another tab took over)`);
+          }
+        }
+        if (e.key === STORAGE_KEY_FORCE_LEADER) {
+          // Another tab is forcing leadership
+          try {
+            const data = JSON.parse(e.newValue || '{}');
+            if (data.tabId && data.tabId !== TAB_ID && isLeader) {
+              // Someone else is forcing takeover, relinquish leadership
+              isLeader = false;
+              if (scanInterval) {
+                clearInterval(scanInterval);
+                scanInterval = null;
+              }
+              updatePanelRole();
+              console.log(`BountySniper: Tab ${TAB_ID} relinquished leadership to ${data.tabId}`);
+            }
+          } catch (err) {}
+        }
+        if (e.key === STORAGE_KEY_POSITION) {
+          // Position changed from another tab, apply it
+          try {
+            const pos = JSON.parse(e.newValue || '{}');
+            if (pos.x !== undefined && pos.y !== undefined) {
+              applyPosition(pos.x, pos.y);
+            }
+          } catch (err) {}
+        }
+        if (e.key === STORAGE_KEY_COLLAPSED) {
+          // Collapsed state changed
+          try {
+            const collapsed = JSON.parse(e.newValue || 'false');
+            if (isCollapsed !== collapsed) {
+              isCollapsed = collapsed;
+              if (panelEl) {
+                panelEl.classList.toggle('collapsed', isCollapsed);
+                panelEl.querySelector('.ff-sniper-toggle').textContent = isCollapsed ? '▶' : '▼';
+              }
+            }
+          } catch (err) {}
+        }
+      });
+    }
+
+    // Update panel to show if leader or follower
+    function updatePanelRole() {
+      if (!panelEl) return;
+      
+      panelEl.classList.toggle('follower', !isLeader);
+    }
+
+    // Force this tab to become leader (called by user clicking satellite icon)
+    function forceLeadership() {
+      console.log(`BountySniper: Tab ${TAB_ID} forcing leadership takeover`);
+      
+      // No longer provisional
+      isProvisionalFollower = false;
+      
+      // Broadcast force takeover message
+      localStorage.setItem(STORAGE_KEY_FORCE_LEADER, JSON.stringify({
+        tabId: TAB_ID,
+        timestamp: Date.now()
+      }));
+      
+      // Take leadership
+      localStorage.setItem(STORAGE_KEY_LEADER, TAB_ID);
+      localStorage.setItem(STORAGE_KEY_HEARTBEAT, Date.now().toString());
+      
+      if (!isLeader) {
+        isLeader = true;
+        
+        // Load full state (mobile) or restore scan state (desktop)
+        if (isMobilePDA) {
+          loadFullState();
+        } else {
+          restoreScanState();
+        }
+        
+        updatePanelRole();
+        
+        // Start scanning if not already
+        if (!scanInterval) {
+          startLeaderScanning();
+        }
+        
+        console.log(`BountySniper: Tab ${TAB_ID} is now LEADER (forced)`);
+      }
+    }
+
+    // Handle visibility change - take leadership after 10 seconds of viewing
+    function setupVisibilityTracking() {
+      // Track when page becomes visible
+      const handleVisibilityChange = () => {
+        if (document.visibilityState === 'visible') {
+          visibilityStartTime = Date.now();
+        } else {
+          visibilityStartTime = 0;
+        }
+      };
+      
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+      
+      // Initial state
+      if (document.visibilityState === 'visible') {
+        visibilityStartTime = Date.now();
+      }
+      
+      // Use longer takeover time on mobile
+      const takeoverTime = isMobilePDA ? VISIBILITY_TAKEOVER_TIME * 2 : VISIBILITY_TAKEOVER_TIME;
+      
+      // Check periodically if we should take over
+      visibilityCheckInterval = setInterval(() => {
+        // Don't take over if we're still in provisional follower mode
+        if (isProvisionalFollower) {
+          return;
+        }
+        
+        if (!isLeader && visibilityStartTime > 0) {
+          const viewingTime = Date.now() - visibilityStartTime;
+          if (viewingTime >= takeoverTime) {
+            // On mobile, only take over if we haven't received updates recently
+            if (isMobilePDA && receivedUpdatesDuringDelay) {
+              console.log('BountySniper: Skipping visibility takeover - received recent updates');
+              receivedUpdatesDuringDelay = false;  // Reset for next check
+              visibilityStartTime = Date.now();  // Reset timer
+              return;
+            }
+            
+            console.log(`BountySniper: Page visible for ${(viewingTime/1000).toFixed(0)}s, taking leadership`);
+            forceLeadership();
+            visibilityStartTime = Date.now();  // Reset to prevent repeated takeovers
+          }
+        }
+      }, 2000);
+    }
+
+    // =========================================================================
+    // WATCHDOG / RECONNECTION HANDLING
+    // =========================================================================
+
+    // Setup watchdog to detect and recover from script crashes
+    function setupWatchdog() {
+      if (watchdogInterval) {
+        clearInterval(watchdogInterval);
+      }
+      
+      lastActivityTime = Date.now();
+      
+      watchdogInterval = setInterval(() => {
+        const timeSinceActivity = Date.now() - lastActivityTime;
+        
+        // If leader and no activity for too long, something is wrong
+        if (isLeader && timeSinceActivity > WATCHDOG_TIMEOUT) {
+          console.warn(`BountySniper: ⚠️ Watchdog triggered - no activity for ${(timeSinceActivity/1000).toFixed(0)}s, restarting...`);
+          restartSniper();
+        }
+        
+        // Update panel status to show we're alive
+        if (isEnabled && panelEl) {
+          const status = panelEl.querySelector('.ff-sniper-status');
+          if (status && !status.innerHTML.includes('Error')) {
+            // Heartbeat indicator - subtle update to show script is running
+            lastActivityTime = Date.now();  // Watchdog check counts as activity
+          }
+        }
+      }, WATCHDOG_INTERVAL);
+      
+      console.log('BountySniper: Watchdog started');
+    }
+
+    // Restart the sniper after a crash/timeout
+    function restartSniper() {
+      console.log('BountySniper: Attempting restart...');
+      
+      // Clear all intervals
+      if (scanInterval) {
+        clearInterval(scanInterval);
+        scanInterval = null;
+      }
+      if (heartbeatInterval) {
+        clearInterval(heartbeatInterval);
+        heartbeatInterval = null;
+      }
+      if (visibilityCheckInterval) {
+        clearInterval(visibilityCheckInterval);
+        visibilityCheckInterval = null;
+      }
+      
+      // Reset state
+      lastActivityTime = Date.now();
+      
+      // Try to become leader again
+      tryBecomeLeader();
+      
+      // Restart scanning if leader
+      if (isLeader) {
+        console.log('BountySniper: Restart successful - resuming as leader');
+        
+        // Setup heartbeat
+        heartbeatInterval = setInterval(() => {
+          checkLeader();
+        }, HEARTBEAT_INTERVAL);
+        
+        // Setup visibility tracking
+        setupVisibilityTracking();
+        
+        // Start scanning
+        const intervalMs = settings.sniperFetchInterval * 1000;
+        scanInterval = setInterval(() => {
+          if (isLeader) {
+            scan();
+            broadcastScanState();
+          }
+        }, intervalMs);
+        
+        // Immediate scan
+        scan();
+        
+        updateStatus('Restarted');
+      } else {
+        console.log('BountySniper: Restart - became follower');
+        receiveTargets();
+      }
+    }
+
+    // =========================================================================
+    // DRAG FUNCTIONALITY
+    // =========================================================================
+
+    // Get saved position or default
+    function getSavedPosition() {
+      try {
+        const saved = JSON.parse(localStorage.getItem(STORAGE_KEY_POSITION) || '{}');
+        if (saved.x !== undefined && saved.y !== undefined) {
+          return saved;
+        }
+      } catch (e) {}
+      
+      // Default position - bottom left, accounting for mobile
+      const isMobile = window.innerWidth < 768;
+      return {
+        x: isMobile ? 10 : 80,
+        y: window.innerHeight - (isMobile ? 290 : 240)
+      };
+    }
+
+    // Save position to localStorage
+    function savePosition(x, y) {
+      try {
+        localStorage.setItem(STORAGE_KEY_POSITION, JSON.stringify({ x, y }));
+      } catch (e) {}
+    }
+
+    // Apply position to panel
+    function applyPosition(x, y) {
+      if (!panelEl) return;
+      
+      // Bounds checking
+      const rect = panelEl.getBoundingClientRect();
+      const maxX = window.innerWidth - rect.width - 10;
+      const maxY = window.innerHeight - rect.height - 10;
+      
+      x = Math.max(10, Math.min(x, maxX));
+      y = Math.max(10, Math.min(y, maxY));
+      
+      panelEl.style.left = x + 'px';
+      panelEl.style.top = y + 'px';
+      panelEl.style.bottom = 'auto';
+      panelEl.style.right = 'auto';
+    }
+
+    // Handle drag start (mouse)
+    function onMouseDown(e) {
+      // Only drag from header, not toggle button
+      if (e.target.closest('.ff-sniper-toggle')) return;
+      if (!e.target.closest('.ff-sniper-header')) return;
+      
+      e.preventDefault();
+      startDrag(e.clientX, e.clientY);
+      
+      document.addEventListener('mousemove', onMouseMove);
+      document.addEventListener('mouseup', onMouseUp);
+    }
+
+    function onMouseMove(e) {
+      if (!isDragging) return;
+      moveDrag(e.clientX, e.clientY);
+    }
+
+    function onMouseUp() {
+      endDrag();
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+    }
+
+    // Handle drag start (touch)
+    function onTouchStart(e) {
+      // Only drag from header, not toggle button
+      if (e.target.closest('.ff-sniper-toggle')) return;
+      if (!e.target.closest('.ff-sniper-header')) return;
+      
+      const touch = e.touches[0];
+      startDrag(touch.clientX, touch.clientY);
+    }
+
+    function onTouchMove(e) {
+      if (!isDragging) return;
+      e.preventDefault();
+      const touch = e.touches[0];
+      moveDrag(touch.clientX, touch.clientY);
+    }
+
+    function onTouchEnd() {
+      endDrag();
+    }
+
+    // Common drag functions
+    function startDrag(clientX, clientY) {
+      isDragging = true;
+      dragStartX = clientX;
+      dragStartY = clientY;
+      
+      const rect = panelEl.getBoundingClientRect();
+      panelStartX = rect.left;
+      panelStartY = rect.top;
+      
+      panelEl.classList.add('dragging');
+    }
+
+    function moveDrag(clientX, clientY) {
+      const deltaX = clientX - dragStartX;
+      const deltaY = clientY - dragStartY;
+      
+      applyPosition(panelStartX + deltaX, panelStartY + deltaY);
+    }
+
+    function endDrag() {
+      if (!isDragging) return;
+      
+      isDragging = false;
+      panelEl.classList.remove('dragging');
+      
+      // Save position
+      const rect = panelEl.getBoundingClientRect();
+      savePosition(rect.left, rect.top);
+    }
+
+    // Reset position on double-click
+    function onDoubleClick(e) {
+      if (!e.target.closest('.ff-sniper-header')) return;
+      if (e.target.closest('.ff-sniper-toggle')) return;
+      
+      // Reset to default position
+      localStorage.removeItem(STORAGE_KEY_POSITION);
+      const pos = getSavedPosition();
+      applyPosition(pos.x, pos.y);
+      savePosition(pos.x, pos.y);
+    }
+
+    // Setup all drag event listeners
+    function setupDragListeners() {
+      if (!panelEl) return;
+      
+      // Mouse events
+      panelEl.addEventListener('mousedown', onMouseDown);
+      
+      // Touch events
+      panelEl.addEventListener('touchstart', onTouchStart, { passive: true });
+      panelEl.addEventListener('touchmove', onTouchMove, { passive: false });
+      panelEl.addEventListener('touchend', onTouchEnd);
+      
+      // Double-click to reset
+      panelEl.addEventListener('dblclick', onDoubleClick);
+    }
+
+    // Parse bounty data from HTML string
+    function parseBountyHtml(html) {
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(html, 'text/html');
+      const bounties = [];
+
+      // Debug: log what we're working with
+      const allLis = doc.querySelectorAll('li');
+      console.log('BountySniper: Found', allLis.length, 'list items in HTML');
+
+      // Try multiple selectors for bounty rows
+      const selectors = [
+        'ul.bounties-list > li',
+        'ul[class*="bounty"] > li',
+        '.bounties-wrap li',
+        'li[class*="bounty"]',
+        'li'  // fallback to all li elements
+      ];
+
+      let foundItems = [];
+      for (const sel of selectors) {
+        const items = doc.querySelectorAll(sel);
+        if (items.length > 0) {
+          console.log('BountySniper: Selector', sel, 'matched', items.length, 'items');
+          // Only use this selector if it found items with profile links
+          const withLinks = Array.from(items).filter(li => li.querySelector('a[href*="profiles.php?XID="]'));
+          if (withLinks.length > 0) {
+            foundItems = withLinks;
+            break;
+          }
+        }
+      }
+
+      console.log('BountySniper: Processing', foundItems.length, 'items with profile links');
+
+      foundItems.forEach(li => {
+        const profileLink = li.querySelector('a[href*="profiles.php?XID="]');
+        if (!profileLink) return;
+
+        const userIdMatch = profileLink.href.match(/XID=(\d+)/);
+        if (!userIdMatch) return;
+
+        const userId = userIdMatch[1];
+        const name = profileLink.textContent.trim();
+
+        // Extract level - look for the level column
+        let level = 0;
+        const levelEl = li.querySelector('[class*="level"]') || li.querySelector('div:nth-child(3)');
+        if (levelEl) {
+          const levelMatch = levelEl.textContent.match(/(\d+)/);
+          if (levelMatch) level = parseInt(levelMatch[1], 10);
+        }
+        // Fallback: search all text for a standalone number that looks like level
+        if (!level) {
+          const allText = li.textContent;
+          const matches = allText.match(/\b([1-9]\d?|100)\b/g);
+          if (matches && matches.length > 0) {
+            // Usually level is a small number, pick first reasonable one
+            for (const m of matches) {
+              const n = parseInt(m, 10);
+              if (n >= 1 && n <= 100) { level = n; break; }
+            }
+          }
+        }
+
+        // Extract reward
+        let reward = 0;
+        const rewardEl = li.querySelector('[class*="reward"]') || li.querySelector('div:first-child');
+        if (rewardEl) {
+          const rewardText = rewardEl.textContent.replace(/[,$]/g, '');
+          const rewardMatch = rewardText.match(/([\d,]+)/);
+          if (rewardMatch) reward = parseInt(rewardMatch[1].replace(/,/g, ''), 10);
+        }
+        // Fallback: search for dollar amounts
+        if (!reward) {
+          const dollarMatch = li.textContent.match(/\$?([\d,]+)/);
+          if (dollarMatch) reward = parseInt(dollarMatch[1].replace(/,/g, ''), 10);
+        }
+
+        // Extract status - look for status column/link
+        let status = 'Okay';
+        let hospitalTime = null;  // null = unknown, 0 = just released, >0 = time remaining in minutes
+        
+        // Look for status link/text
+        const statusLink = li.querySelector('a[href*="hospitalview"]');
+        const travelingLink = li.querySelector('a[href*="travelagency"], a[class*="traveling"], a[class*="abroad"]');
+        const statusEl = li.querySelector('[class*="status"]');
+        const liText = li.textContent;
+        
+        if (statusLink || /hospital/i.test(liText)) {
+          status = 'Hospital';
+          // Try to extract hospital time - formats: "HH:MM:SS" or "MM:SS" or "X hrs Y mins" etc.
+          const timePatterns = [
+            /(\d+):(\d+):(\d+)/,  // HH:MM:SS
+            /(\d+):(\d+)/,        // MM:SS
+            /(\d+)\s*h(?:r|our)?s?\s*(\d+)?\s*m/i,  // "X hrs Y mins"
+            /(\d+)\s*m(?:in)?s?/i  // "X mins"
+          ];
+          
+          for (const pattern of timePatterns) {
+            const match = liText.match(pattern);
+            if (match) {
+              if (match[3] !== undefined) {
+                // HH:MM:SS format
+                hospitalTime = parseInt(match[1], 10) * 60 + parseInt(match[2], 10) + (parseInt(match[3], 10) / 60);
+              } else if (match[2] !== undefined && match[0].includes(':')) {
+                // MM:SS format
+                hospitalTime = parseInt(match[1], 10) + (parseInt(match[2], 10) / 60);
+              } else if (match[2] !== undefined) {
+                // X hrs Y mins format
+                hospitalTime = parseInt(match[1], 10) * 60 + (parseInt(match[2], 10) || 0);
+              } else {
+                // Just minutes
+                hospitalTime = parseInt(match[1], 10);
+              }
+              break;
+            }
+          }
+          
+          // If we couldn't parse time, assume they're in for a while
+          if (hospitalTime === null) hospitalTime = 999;
+          
+        } else if (travelingLink || /travel|abroad|flying/i.test(liText)) {
+          status = 'Traveling';
+        }
+
+        bounties.push({
+          id: userId,
+          userId,
+          name,
+          level,
+          reward,
+          status,
+          hospitalTime,
+          rsi: null,
+          beaten: null,
+          valueScore: 0
+        });
+      });
+
+      return bounties;
+    }
+
+    // Parse bounties from current page DOM (when on bounty page)
+    function parseBountyDOM() {
+      const bounties = [];
+
+      // More comprehensive selectors for bounty rows
+      const rows = document.querySelectorAll('ul.bounties-list > li, [class*="bounties"] li, ul.item > li');
+      
+      console.log('BountySniper: Found', rows.length, 'potential bounty rows');
+
+      rows.forEach(li => {
+        const profileLink = li.querySelector('a[href*="profiles.php?XID="]');
+        if (!profileLink) return;
+
+        const userIdMatch = profileLink.href.match(/XID=(\d+)/);
+        if (!userIdMatch) return;
+
+        const userId = userIdMatch[1];
+        const name = profileLink.textContent.trim();
+        const liText = li.textContent;
+
+        // Get data from table cells
+        const cells = li.querySelectorAll('div');
+        let level = 0, reward = 0;
+
+        cells.forEach(cell => {
+          const text = cell.textContent.trim();
+          
+          // Check for reward (has $ or large number)
+          if (/^\$?[\d,]+$/.test(text.replace(/,/g, ''))) {
+            const num = parseInt(text.replace(/[$,]/g, ''), 10);
+            if (num > 10000) reward = num;
+            else if (num >= 1 && num <= 100 && !level) level = num;
+          }
+        });
+
+        // Check status - look for status column specifically
+        let status = 'Okay';  // Default to Okay
+        let hospitalTime = null;
+        
+        // Look for status-related elements
+        const statusLink = li.querySelector('a[href*="hospitalview"]');
+        const travelLink = li.querySelector('a[class*="traveling"], a[class*="abroad"]');
+        const okayLink = li.querySelector('a[class*="okay"], span[class*="okay"]');
+        
+        // Check the STATUS column text
+        const statusTexts = ['Hospital', 'Traveling', 'Abroad', 'Okay'];
+        for (const cell of cells) {
+          const cellText = cell.textContent.trim();
+          for (const st of statusTexts) {
+            if (cellText.toLowerCase() === st.toLowerCase()) {
+              if (st === 'Hospital') {
+                status = 'Hospital';
+              } else if (st === 'Traveling' || st === 'Abroad') {
+                status = 'Traveling';
+              } else if (st === 'Okay') {
+                status = 'Okay';
+              }
+              break;
+            }
+          }
+        }
+        
+        // Fallback detection
+        if (statusLink) {
+          status = 'Hospital';
+        } else if (travelLink) {
+          status = 'Traveling';
+        }
+        
+        // Parse hospital time if applicable
+        if (status === 'Hospital') {
+          const timePatterns = [
+            /(\d+):(\d+):(\d+)/,  // HH:MM:SS
+            /(\d+):(\d+)/         // MM:SS or HH:MM
+          ];
+          
+          for (const pattern of timePatterns) {
+            const match = liText.match(pattern);
+            if (match) {
+              if (match[3] !== undefined) {
+                hospitalTime = parseInt(match[1], 10) * 60 + parseInt(match[2], 10);
+              } else {
+                const first = parseInt(match[1], 10);
+                const second = parseInt(match[2], 10);
+                hospitalTime = first * 60 + second;  // Assume HH:MM
+              }
+              break;
+            }
+          }
+          if (hospitalTime === null) hospitalTime = 999;  // Unknown, assume long
+        }
+
+        // Get level from specific position if available
+        const lvlCell = li.querySelector('[class*="lvl"], [class*="level"]');
+        if (lvlCell) {
+          const m = lvlCell.textContent.match(/(\d+)/);
+          if (m) level = parseInt(m[1], 10);
+        }
+
+        bounties.push({
+          id: userId,
+          userId,
+          name,
+          level,
+          reward,
+          status,
+          hospitalTime,
+          rsi: null,
+          beaten: null,
+          valueScore: 0
+        });
+      });
+
+      // Log status breakdown
+      const statusCounts = { Okay: 0, Hospital: 0, Traveling: 0 };
+      bounties.forEach(b => statusCounts[b.status] = (statusCounts[b.status] || 0) + 1);
+      console.log('BountySniper: Status breakdown:', statusCounts);
+
+      return bounties;
+    }
+
+    // Fetch bounty data using hidden iframe (needed because TORN uses React/SPA)
+    // Scans multiple pages and uses "Hide Unavailable" filter
+    async function fetchBountyPage() {
+      const MAX_PAGES_TO_SCAN = Math.min(settings.sniperPagesToScan || 10, 20);  // Use setting, max 20
+      const BOUNTIES_PER_PAGE = 20;  // TORN shows 20 bounties per page
+      const allBounties = [];
+      const seenIds = new Set();
+
+      for (let page = 1; page <= MAX_PAGES_TO_SCAN; page++) {
+        console.log(`BountySniper: Loading page ${page}/${MAX_PAGES_TO_SCAN}...`);
+        updateStatus(`Loading page ${page}/${MAX_PAGES_TO_SCAN}...`);
+        
+        try {
+          const pageBounties = await fetchBountyPageSingle(page);
+          
+          // Add unique bounties
+          let newCount = 0;
+          for (const b of pageBounties) {
+            if (!seenIds.has(b.id)) {
+              seenIds.add(b.id);
+              allBounties.push(b);
+              newCount++;
+            }
+          }
+          
+          console.log(`BountySniper: Page ${page} found ${pageBounties.length} bounties, ${newCount} new, total: ${allBounties.length}`);
+          
+          // If we got very few bounties, might be at end of filtered results
+          if (pageBounties.length < 5) {
+            console.log('BountySniper: Few results on page, stopping pagination');
+            break;
+          }
+          
+          // Throttled delay between page loads to reduce load
+          if (page < MAX_PAGES_TO_SCAN) {
+            await new Promise(r => setTimeout(r, PAGE_LOAD_DELAY));
+          }
+        } catch (err) {
+          console.error(`BountySniper: Error loading page ${page}:`, err);
+          break;
+        }
+      }
+
+      // Log status breakdown from iframe fetching
+      const statusCounts = { Okay: 0, Hospital: 0, Traveling: 0, Unknown: 0 };
+      allBounties.forEach(b => {
+        statusCounts[b.status] = (statusCounts[b.status] || 0) + 1;
+      });
+      console.log('BountySniper: Iframe total status breakdown:', statusCounts);
+
+      return allBounties;
+    }
+
+    // Fetch a single page of bounties
+    async function fetchBountyPageSingle(pageNum = 1) {
+      return new Promise((resolve, reject) => {
+        // Create hidden iframe
+        const iframe = document.createElement('iframe');
+        iframe.style.cssText = 'position:fixed;left:-9999px;top:-9999px;width:1024px;height:768px;visibility:hidden;';
+        
+        // TORN pagination uses: #/!p=main&start=X where X = (page-1) * 20
+        const start = (pageNum - 1) * 20;
+        const url = `https://www.torn.com/bounties.php#/!p=main&start=${start}`;
+        console.log(`BountySniper: Loading iframe URL: ${url}`);
+        iframe.src = url;
+        
+        let resolved = false;
+        let checkInterval = null;
+        let clickedHideUnavailable = false;
+        
+        const cleanup = () => {
+          if (checkInterval) clearInterval(checkInterval);
+          if (iframe.parentNode) iframe.remove();
+        };
+        
+        const tryClickHideUnavailable = (doc) => {
+          if (clickedHideUnavailable) return false;
+          try {
+            // Look for "Hide Unavailable" checkbox and click it
+            const labels = doc.querySelectorAll('label');
+            for (const label of labels) {
+              if (label.textContent.includes('Hide Unavailable')) {
+                const checkbox = label.querySelector('input[type="checkbox"]');
+                if (checkbox && !checkbox.checked) {
+                  console.log('BountySniper: Clicking Hide Unavailable checkbox');
+                  checkbox.click();
+                  clickedHideUnavailable = true;
+                  return true;  // Will need to wait for re-render
+                } else if (checkbox && checkbox.checked) {
+                  clickedHideUnavailable = true;  // Already checked
+                }
+              }
+            }
+            // Also try by finding any checkbox near "Hide" text
+            const allCheckboxes = doc.querySelectorAll('input[type="checkbox"]');
+            for (const cb of allCheckboxes) {
+              const parent = cb.closest('label') || cb.parentElement;
+              if (parent && /hide.*unavailable/i.test(parent.textContent)) {
+                if (!cb.checked) {
+                  cb.click();
+                  clickedHideUnavailable = true;
+                  return true;
+                }
+                clickedHideUnavailable = true;
+              }
+            }
+          } catch (e) {
+            console.log('BountySniper: Could not click Hide Unavailable:', e);
+          }
+          return false;
+        };
+        
+        const tryParse = () => {
+          try {
+            const doc = iframe.contentDocument || iframe.contentWindow?.document;
+            if (!doc) return null;
+            
+            // Look for profile links - if found, page has rendered
+            const profileLinks = doc.querySelectorAll('a[href*="profiles.php?XID="]');
+            if (profileLinks.length > 0) {
+              return doc;
+            }
+          } catch (e) {
+            // Cross-origin error - shouldn't happen since same domain
+          }
+          return null;
+        };
+        
+        // Timeout after 30 seconds per page
+        const timeout = setTimeout(() => {
+          if (!resolved) {
+            resolved = true;
+            cleanup();
+            console.log(`BountySniper: Iframe timeout for page ${pageNum}`);
+            reject(new Error('Iframe timeout'));
+          }
+        }, 30000);
+        
+        iframe.onload = () => {
+          let attempts = 0;
+          let waitingForRerender = false;
+          
+          checkInterval = setInterval(() => {
+            attempts++;
+            const doc = tryParse();
+            
+            if (doc) {
+              // Try to click Hide Unavailable on first detection
+              if (!clickedHideUnavailable) {
+                const clicked = tryClickHideUnavailable(doc);
+                if (clicked) {
+                  // Wait for page to re-render after clicking
+                  waitingForRerender = true;
+                  attempts = 0;  // Reset attempts counter
+                  return;
+                }
+              }
+              
+              // If we clicked the checkbox, wait a bit for re-render
+              if (waitingForRerender && attempts < 8) {
+                return;  // Wait 4 more seconds (8 * 500ms)
+              }
+              
+              if (!resolved) {
+                resolved = true;
+                clearTimeout(timeout);
+                
+                // Parse bounties from iframe DOM
+                const bounties = parseBountyFromDoc(doc);
+                console.log(`BountySniper: Page ${pageNum} parsed ${bounties.length} bounties`);
+                
+                cleanup();
+                resolve(bounties);
+              }
+            } else if (attempts > 50) {
+              // Give up after 25 seconds
+              if (!resolved) {
+                resolved = true;
+                clearTimeout(timeout);
+                cleanup();
+                console.log(`BountySniper: Page ${pageNum} content never rendered`);
+                reject(new Error('Content not rendered'));
+              }
+            }
+          }, 500);
+        };
+        
+        iframe.onerror = () => {
+          if (!resolved) {
+            resolved = true;
+            clearTimeout(timeout);
+            cleanup();
+            reject(new Error('Iframe load error'));
+          }
+        };
+        
+        document.body.appendChild(iframe);
+      });
+    }
+
+    // Parse bounties from a document (iframe or current page)
+    function parseBountyFromDoc(doc) {
+      const bounties = [];
+
+      // Find all list items with profile links
+      const rows = doc.querySelectorAll('li');
+      
+      rows.forEach(li => {
+        const profileLink = li.querySelector('a[href*="profiles.php?XID="]');
+        if (!profileLink) return;
+
+        const userIdMatch = profileLink.href.match(/XID=(\d+)/);
+        if (!userIdMatch) return;
+
+        const userId = userIdMatch[1];
+        const name = profileLink.textContent.trim();
+        const liText = li.textContent.toLowerCase();
+
+        // Extract level
+        let level = 0;
+        const cells = li.querySelectorAll('div');
+        cells.forEach(cell => {
+          const text = cell.textContent.trim();
+          if (/^\d+$/.test(text)) {
+            const num = parseInt(text, 10);
+            if (num >= 1 && num <= 100 && !level) level = num;
+          }
+        });
+
+        // Extract reward
+        let reward = 0;
+        const rewardMatch = li.textContent.match(/\$?([\d,]+)/);
+        if (rewardMatch) {
+          const num = parseInt(rewardMatch[1].replace(/,/g, ''), 10);
+          if (num > 10000) reward = num;
+        }
+
+        // Extract status - be very explicit about detection
+        let status = 'Unknown';  // Default to Unknown, not Okay
+        let hospitalTime = null;
+        
+        // Method 1: Look for status links
+        const hospitalLink = li.querySelector('a[href*="hospitalview"], a[class*="hospital"]');
+        const travelLink = li.querySelector('a[href*="abroad"], a[class*="traveling"], a[class*="abroad"]');
+        const okayLink = li.querySelector('a[class*="okay"], span[class*="okay"]');
+        
+        // Method 2: Check for status text in cells
+        for (const cell of cells) {
+          const cellText = cell.textContent.trim().toLowerCase();
+          if (cellText === 'hospital') {
+            status = 'Hospital';
+            break;
+          } else if (cellText === 'traveling' || cellText === 'abroad') {
+            status = 'Traveling';
+            break;
+          } else if (cellText === 'okay') {
+            status = 'Okay';
+            break;
+          }
+        }
+        
+        // Method 3: Check links if text didn't match
+        if (status === 'Unknown') {
+          if (hospitalLink) {
+            status = 'Hospital';
+          } else if (travelLink) {
+            status = 'Traveling';
+          } else if (okayLink) {
+            status = 'Okay';
+          }
+        }
+        
+        // Method 4: Check full row text for keywords
+        if (status === 'Unknown') {
+          if (liText.includes('hospital')) {
+            status = 'Hospital';
+          } else if (liText.includes('traveling') || liText.includes('abroad')) {
+            status = 'Traveling';
+          } else if (liText.includes('okay')) {
+            status = 'Okay';
+          }
+        }
+        
+        // Parse hospital time if applicable
+        if (status === 'Hospital') {
+          const timeMatch = li.textContent.match(/(\d+):(\d+):(\d+)/);
+          if (timeMatch) {
+            hospitalTime = parseInt(timeMatch[1], 10) * 60 + parseInt(timeMatch[2], 10);
+          } else {
+            hospitalTime = 999;  // Unknown, assume long
+          }
+        }
+
+        bounties.push({
+          id: userId,
+          userId,
+          name,
+          level,
+          reward,
+          status,
+          hospitalTime,
+          rsi: null,
+          beaten: null,
+          valueScore: 0
+        });
+      });
+
+      // Log status breakdown for this page
+      const statusCounts = { Okay: 0, Hospital: 0, Traveling: 0, Unknown: 0 };
+      bounties.forEach(b => statusCounts[b.status] = (statusCounts[b.status] || 0) + 1);
+      console.log('BountySniper: Page status breakdown:', statusCounts);
+
+      return bounties;
+    }
+
+    // Check if we've beaten this player before
+    async function checkBeatenStatus(userId) {
+      if (beatenCache.has(userId)) {
+        return beatenCache.get(userId);
+      }
+
+      try {
+        const history = await FightDB.getOpponentHistory(userId);
+        const wins = history.filter(f => f.outcome === 'win').length;
+        const losses = history.filter(f => f.outcome === 'loss').length;
+        const result = { wins, losses, total: history.length };
+        beatenCache.set(userId, result);
+        return result;
+      } catch (e) {
+        return { wins: 0, losses: 0, total: 0 };
+      }
+    }
+
+    // Get RSI from cache or fetch - also returns status info
+    // Set forceRefresh=true to bypass cache (used for panel target verification)
+    async function getRsi(userId, forceRefresh = false) {
+      // Check cache unless force refresh requested
+      if (!forceRefresh) {
+        const cached = rsiCache.get(userId);
+        if (cached && (Date.now() - cached.timestamp) < RSI_CACHE_TTL) {
+          return cached.rsi;
+        }
+      }
+
+      // Check API budget
+      if (!canUseApi()) {
+        return null;
+      }
+
+      return new Promise((resolve) => {
+        apiCallsThisMinute++;
+        // Request all needed selections: personalstats for RSI calc, status for current state
+        ApiManager.get(`/user/${userId}?selections=personalstats,basic,profile`, d => {
+          if (!d) {
+            console.log(`BountySniper: API returned null for ${userId}`);
+            resolve(null);
+            return;
+          }
+          
+          // Calculate RSI
+          const rsi = calcRSI(USER_BP, d.personalstats, d.basic, d.life);
+          
+          // Extract level and age from API response
+          const playerLevel = d.level || d.basic?.level || 0;
+          const playerAge = d.age || 0;  // Age in days
+          
+          // Log level/age for debugging
+          console.log(`BountySniper: ${d.name || userId} - Level: ${playerLevel}, Age: ${playerAge} days`);
+          
+          // Extract status - TORN API returns status object with state, description, until
+          const statusObj = d.status || {};
+          const stateStr = statusObj.state || '';
+          const statusDesc = statusObj.description || '';
+          const statusUntil = statusObj.until || 0;
+          
+          // Log raw API response for debugging
+          console.log(`BountySniper: API raw status for ${d.name || userId}:`, JSON.stringify(statusObj));
+          
+          // Normalize status - be very explicit about detection
+          let normalizedStatus = 'Unknown';
+          
+          // Check state string first
+          if (stateStr) {
+            const stateLower = stateStr.toLowerCase();
+            if (stateLower.includes('hospital')) {
+              normalizedStatus = 'Hospital';
+            } else if (stateLower.includes('travel') || stateLower.includes('abroad') || stateLower.includes('flying')) {
+              normalizedStatus = 'Traveling';
+            } else if (stateLower === 'okay' || stateLower === 'online' || stateLower === 'offline' || stateLower === 'idle') {
+              normalizedStatus = 'Okay';
+            }
+          }
+          
+          // Also check description as backup
+          if (normalizedStatus === 'Unknown' && statusDesc) {
+            const descLower = statusDesc.toLowerCase();
+            if (descLower.includes('hospital')) {
+              normalizedStatus = 'Hospital';
+            } else if (descLower.includes('travel') || descLower.includes('abroad')) {
+              normalizedStatus = 'Traveling';
+            }
+          }
+          
+          // If still unknown but we got a response, assume Okay
+          if (normalizedStatus === 'Unknown' && d.name) {
+            normalizedStatus = 'Okay';
+          }
+          
+          // Calculate hospital time remaining in minutes
+          let hospitalMins = null;
+          if (normalizedStatus === 'Hospital' && statusUntil) {
+            const remainingMs = (statusUntil * 1000) - Date.now();
+            hospitalMins = Math.max(0, remainingMs / 60000);
+            console.log(`BountySniper: ${d.name} hospital time: ${hospitalMins.toFixed(1)} mins remaining`);
+          }
+          
+          const result = {
+            adjusted: rsi.adjusted,
+            raw: rsi.raw,
+            life: d.life?.maximum ? Math.round((d.life.current / d.life.maximum) * 100) : 100,
+            status: normalizedStatus,
+            hospitalTime: hospitalMins,
+            statusDescription: statusDesc,
+            level: playerLevel,
+            age: playerAge
+          };
+          
+          console.log(`BountySniper: API status for ${d.name || userId}: "${stateStr}" -> ${normalizedStatus}`);
+          
+          // Update cache
+          rsiCache.set(userId, { rsi: result, timestamp: Date.now() });
+          resolve(result);
+        });
+      });
+    }
+
+    // Check if we can make an API call within budget
+    function canUseApi() {
+      // Reset counter every minute
+      if (Date.now() - lastMinuteReset > 60000) {
+        apiCallsThisMinute = 0;
+        lastMinuteReset = Date.now();
+      }
+      return apiCallsThisMinute < settings.sniperApiBudget;
+    }
+
+    // Calculate value score for a bounty
+    function calculateValueScore(bounty) {
+      // Base score from reward (normalized to 0-100)
+      const rewardScore = Math.min(bounty.reward / 1000000, 1) * 40;  // Max 40 points for $1M+
+
+      // RSI score (higher RSI = easier = better)
+      let rsiScore = 0;
+      if (bounty.rsi) {
+        // RSI 100 = 50% win, RSI 150 = ~90% win, RSI 200+ = 100% win
+        const winProb = Math.min(bounty.rsi.adjusted / 150, 1);
+        rsiScore = winProb * 30;  // Max 30 points
+      }
+
+      // Beaten bonus
+      let beatenScore = 0;
+      if (bounty.beaten && bounty.beaten.wins > 0) {
+        const winRate = bounty.beaten.wins / (bounty.beaten.total || 1);
+        beatenScore = winRate * 20;  // Max 20 points
+      }
+
+      // Status penalty
+      let statusPenalty = 0;
+      if (bounty.status === 'Hospital') statusPenalty = 5;
+      if (bounty.status === 'Traveling') statusPenalty = 15;
+
+      return rewardScore + rsiScore + beatenScore - statusPenalty;
+    }
+
+    // Apply filters to bounty list
+    // Pass 1 (strictHospitalFilter=false): Only filter by reward/level, let all statuses through for API verification
+    // Pass 2 (strictHospitalFilter=true): Apply full status filters after API verification
+    function filterBounties(bounties, strictHospitalFilter = false) {
+      return bounties.filter(b => {
+        // Reward filter - always apply
+        if (b.reward < settings.sniperMinReward) return false;
+
+        // Level filter - always apply
+        if (b.level > settings.sniperMaxLevel && b.level > 0) return false;
+
+        // RSI filter - only if we have RSI data
+        if (b.rsi) {
+          if (b.rsi.adjusted < settings.sniperRsiMin) return false;
+          if (b.rsi.adjusted > settings.sniperRsiMax) return false;
+        }
+
+        // STATUS FILTERS - Only apply in strict mode (after API verification)
+        // Page-scraped status is unreliable, so we let everything through initially
+        if (!strictHospitalFilter) {
+          // Non-strict mode: let all statuses through for API verification
+          // Only filter out if we KNOW it's bad (has API data already)
+          if (b.rsi && b.rsi.status) {
+            // We have API-verified status, can apply some filters
+            if (b.rsi.status === 'Traveling' && !settings.sniperShowTraveling) {
+              return false;
+            }
+          }
+          return true;
+        }
+
+        // STRICT MODE - Apply full status filters (after API verification)
+        
+        // Unknown status after API check = filter out
+        if (b.status === 'Unknown') {
+          console.log(`BountySniper: Filtering out ${b.name} - unknown status`);
+          return false;
+        }
+        
+        // Okay status
+        if (b.status === 'Okay') {
+          if (!settings.sniperShowOkay) {
+            console.log(`BountySniper: Filtering out ${b.name} - okay (setting disabled)`);
+            return false;
+          }
+        }
+        
+        // Hospital status
+        if (b.status === 'Hospital') {
+          if (!settings.sniperShowHospital) {
+            console.log(`BountySniper: Filtering out ${b.name} - hospital (setting disabled)`);
+            return false;
+          }
+          // Hospital time filter
+          if (b.hospitalTime !== null && b.hospitalTime > settings.sniperHospitalMins) {
+            console.log(`BountySniper: Filtering out ${b.name} - hospital time ${b.hospitalTime.toFixed(1)} mins > ${settings.sniperHospitalMins} threshold`);
+            return false;
+          }
+          // If we still don't have hospital time after API check, filter out
+          if (b.hospitalTime === null || b.hospitalTime === 999) {
+            console.log(`BountySniper: Filtering out ${b.name} - hospital time unknown`);
+            return false;
+          }
+        }
+        
+        // Traveling status
+        if (b.status === 'Traveling') {
+          if (!settings.sniperShowTraveling) {
+            console.log(`BountySniper: Filtering out ${b.name} - traveling (setting disabled)`);
+            return false;
+          }
+        }
+
+        return true;
+      });
+    }
+
+    // Sort targets based on user preference
+    function sortTargets(targets) {
+      const sortBy = settings.sniperSortBy;
+      return targets.sort((a, b) => {
+        switch (sortBy) {
+          case 'reward':
+            return b.reward - a.reward;
+          case 'rsi':
+            return (b.rsi?.adjusted || 0) - (a.rsi?.adjusted || 0);
+          case 'beaten':
+            return (b.beaten?.wins || 0) - (a.beaten?.wins || 0);
+          case 'value':
+          default:
+            return b.valueScore - a.valueScore;
+        }
+      });
+    }
+
+    // Main scan function - uses progressive scanning
+    async function scan() {
+      if (!isEnabled || !API_KEY) {
+        console.log('BountySniper: Not scanning - disabled or no API key');
+        return;
+      }
+
+      // Update activity time for watchdog
+      lastActivityTime = Date.now();
+
+      try {
+        const now = Date.now();
+        const needsBountyRefresh = (now - lastBountyFetch) > BOUNTY_REFRESH_INTERVAL || cachedCandidates.length === 0;
+        
+        // PHASE 1: Refresh bounty list if needed (every 3 minutes or if empty)
+        if (needsBountyRefresh) {
+          updateStatus('Refreshing bounty list...');
+          console.log('BountySniper: Refreshing bounty list...');
+          
+          let bounties;
+          
+          // If on bounty page, scrape DOM directly (fastest)
+          if (location.href.includes('bounties.php')) {
+            console.log('BountySniper: Scraping bounty page DOM');
+            bounties = parseBountyDOM();
+          } else {
+            // Use iframe to load bounty page and scrape after React renders
+            console.log('BountySniper: Loading bounty page via iframe...');
+            try {
+              bounties = await fetchBountyPage();
+            } catch (fetchErr) {
+              console.error('BountySniper: Fetch failed:', fetchErr);
+              updateStatus('Fetch failed');
+              return;
+            }
+          }
+
+          console.log('BountySniper: Parsed', bounties.length, 'bounties');
+
+          if (bounties.length === 0) {
+            updateStatus('No bounties found');
+            renderPanel();
+            return;
+          }
+
+          // Deduplicate by userId (keep highest reward entry)
+          const bountyMap = new Map();
+          for (const b of bounties) {
+            const existing = bountyMap.get(b.userId);
+            if (!existing || b.reward > existing.reward) {
+              bountyMap.set(b.userId, b);
+            }
+          }
+          cachedBounties = Array.from(bountyMap.values());
+          console.log('BountySniper: After deduplication:', cachedBounties.length, 'unique bounties');
+
+          // Apply initial filter (non-strict, lets unknown hospital times through)
+          cachedCandidates = filterBounties(cachedBounties, false);
+          console.log('BountySniper: After initial filtering:', cachedCandidates.length, 'candidates');
+
+          // Check beaten status for all candidates (uses local DB, no API)
+          for (const bounty of cachedCandidates) {
+            bounty.beaten = await checkBeatenStatus(bounty.userId);
+          }
+
+          // Sort candidates for processing order
+          // 1. Prioritize candidates matching user's enabled statuses (page-scraped hint)
+          // 2. Not yet checked (no RSI cache)
+          // 3. Okay status first  
+          // 4. Beaten before
+          // 5. By reward
+          cachedCandidates.sort((a, b) => {
+            // First: prioritize candidates matching enabled status settings
+            // This uses page-scraped status as a HINT (not a filter)
+            const aMatchesPrefs = statusMatchesPrefs(a.status);
+            const bMatchesPrefs = statusMatchesPrefs(b.status);
+            if (aMatchesPrefs && !bMatchesPrefs) return -1;
+            if (!aMatchesPrefs && bMatchesPrefs) return 1;
+            
+            // Then: unchecked candidates
+            const aHasCache = rsiCache.has(a.userId) && (now - rsiCache.get(a.userId).timestamp) < RSI_CACHE_TTL;
+            const bHasCache = rsiCache.has(b.userId) && (now - rsiCache.get(b.userId).timestamp) < RSI_CACHE_TTL;
+            if (!aHasCache && bHasCache) return -1;
+            if (aHasCache && !bHasCache) return 1;
+            
+            // Okay status gets priority
+            if (a.status === 'Okay' && b.status !== 'Okay') return -1;
+            if (a.status !== 'Okay' && b.status === 'Okay') return 1;
+            // Then beaten before
+            if (a.beaten?.wins && !b.beaten?.wins) return -1;
+            if (!a.beaten?.wins && b.beaten?.wins) return 1;
+            // Then by reward
+            return b.reward - a.reward;
+          });
+
+          // Reset scan index on refresh
+          scanIndex = 0;
+          lastBountyFetch = now;
+          
+          // Clean up verified targets - remove those no longer on bounty list
+          const currentUserIds = new Set(cachedBounties.map(b => b.userId));
+          for (const userId of verifiedTargets.keys()) {
+            if (!currentUserIds.has(userId)) {
+              verifiedTargets.delete(userId);
+            }
+          }
+        }
+
+        // PHASE 1.5: Verify existing panel targets are still valid
+        // This runs FIRST to ensure panel accuracy (uses up to 5 API calls for 5 targets)
+        if (verifiedTargets.size > 0) {
+          updateStatus('Verifying targets...');
+          const verifyApiCalls = await verifyPanelTargets();
+          console.log(`BountySniper: Target verification used ${verifyApiCalls} API calls`);
+        }
+
+        // PHASE 2: Progressive API checking from current scan position
+        if (cachedCandidates.length === 0) {
+          updateStatus('No candidates');
+          renderPanel();
+          return;
+        }
+
+        const budget = settings.sniperApiBudget;
+        let apiCallsMade = 0;
+        let checkedThisCycle = 0;
+        const startIndex = scanIndex;
+        
+        console.log(`BountySniper: Starting API check from index ${scanIndex}/${cachedCandidates.length}, budget: ${budget}`);
+        updateStatus(`Checking ${scanIndex}/${cachedCandidates.length}...`);
+
+        // Process candidates starting from scanIndex
+        while (checkedThisCycle < cachedCandidates.length && canUseApi()) {
+          const idx = (startIndex + checkedThisCycle) % cachedCandidates.length;
+          const bounty = cachedCandidates[idx];
+          checkedThisCycle++;
+          
+          // Check if already cached
+          const cached = rsiCache.get(bounty.userId);
+          if (cached && (Date.now() - cached.timestamp) < RSI_CACHE_TTL) {
+            // Use cached data
+            bounty.rsi = cached.rsi;
+            bounty.status = cached.rsi.status || bounty.status;
+            bounty.hospitalTime = cached.rsi.hospitalTime;
+            
+            // If this is a verified good target, update in verified map
+            const result = isGoodTarget(bounty);
+            if (result.valid) {
+              bounty.valueScore = calculateValueScore(bounty);
+              verifiedTargets.set(bounty.userId, bounty);
+            } else {
+              verifiedTargets.delete(bounty.userId);
+            }
+            continue;
+          }
+
+          // Need to make API call
+          bounty.rsi = await getRsi(bounty.userId);
+          apiCallsMade++;
+          
+          if (bounty.rsi) {
+            bounty.status = bounty.rsi.status || bounty.status;
+            bounty.hospitalTime = bounty.rsi.hospitalTime;
+            
+            // Check if this is a good target
+            const result = isGoodTarget(bounty);
+            if (result.valid) {
+              bounty.valueScore = calculateValueScore(bounty);
+              verifiedTargets.set(bounty.userId, bounty);
+              console.log(`BountySniper: ✓ Good target: ${bounty.name} (${bounty.status}, RSI: ${bounty.rsi.adjusted?.toFixed(0) || '?'}%)`);
+            } else {
+              verifiedTargets.delete(bounty.userId);
+              console.log(`BountySniper: ✗ Filtered: ${bounty.name} - ${result.reason}`);
+            }
+          }
+          
+          // Throttled delay between API calls
+          await new Promise(r => setTimeout(r, API_CALL_DELAY));
+        }
+
+        // Update scan index for next cycle
+        scanIndex = (startIndex + checkedThisCycle) % cachedCandidates.length;
+        
+        const progress = Math.round((getCheckedCount() / cachedCandidates.length) * 100);
+        const cacheHits = checkedThisCycle - apiCallsMade;
+        
+        // Detailed logging for debugging
+        if (apiCallsMade === 0 && checkedThisCycle > 0) {
+          console.log(`BountySniper: All ${checkedThisCycle} candidates used cached data (${cacheHits} cache hits, progress: ${progress}%)`);
+        } else if (checkedThisCycle === 0) {
+          console.log(`BountySniper: No candidates checked this cycle (API budget: ${apiCallsThisMinute}/${settings.sniperApiBudget}, progress: ${progress}%)`);
+        } else {
+          console.log(`BountySniper: Made ${apiCallsMade} API calls, ${cacheHits} cache hits, checked ${checkedThisCycle} candidates, progress: ${progress}%`);
+        }
+        
+        // If we hit 100% and bounties were refreshed, clear cache for removed players
+        if (progress === 100 && needsBountyRefresh) {
+          const currentIds = new Set(cachedCandidates.map(c => c.userId));
+          let clearedCount = 0;
+          for (const [userId] of rsiCache) {
+            if (!currentIds.has(userId)) {
+              rsiCache.delete(userId);
+              clearedCount++;
+            }
+          }
+          if (clearedCount > 0) {
+            console.log(`BountySniper: Cleared ${clearedCount} stale cache entries for removed bounties`);
+          }
+        }
+
+        // PHASE 3: Build targets from verified targets
+        // Save current target IDs BEFORE updating for sound alert comparison
+        const previousTargetIds = new Set(targets.map(t => t.userId));
+        
+        const verifiedArray = Array.from(verifiedTargets.values());
+        targets = sortTargets(verifiedArray).slice(0, MAX_TARGETS);
+
+        // Check for NEW targets that just appeared in the panel
+        const newTargetsInPanel = targets.filter(t => !previousTargetIds.has(t.userId));
+        if (newTargetsInPanel.length > 0) {
+          console.log(`BountySniper: 🆕 New targets detected: ${newTargetsInPanel.map(t => t.name).join(', ')}`);
+          if (settings.sniperSoundAlert) {
+            playAlertSound();
+          }
+        }
+
+        // Update status
+        const statusMsg = `${targets.length} targets | ${progress}% scanned`;
+        updateStatus(statusMsg);
+
+        // Broadcast targets to other tabs
+        broadcastTargets();
+
+        // Update UI
+        renderPanel();
+
+      } catch (e) {
+        console.error('BountySniper: Scan error', e);
+        updateStatus('Error: ' + (e.message || 'Unknown'));
+      }
+    }
+
+    // Check if a bounty passes all filters (after API verification)
+    function isGoodTarget(bounty) {
+      // Must have RSI data
+      if (!bounty.rsi) {
+        return { valid: false, reason: 'no RSI data' };
+      }
+      
+      // NEW PLAYER PROTECTION: Cannot attack players level 15 or below
+      const playerLevel = bounty.rsi.level || bounty.level || 0;
+      if (playerLevel > 0 && playerLevel <= 15) {
+        return { valid: false, reason: `Level ${playerLevel} ≤ 15 (protected)` };
+      }
+      
+      // NEW PLAYER PROTECTION: Cannot attack players 15 days old or less
+      const playerAge = bounty.rsi.age || 0;
+      if (playerAge > 0 && playerAge <= 15) {
+        return { valid: false, reason: `Age ${playerAge} days ≤ 15 (protected)` };
+      }
+      
+      // RSI filter - add null safety
+      const rsiValue = bounty.rsi.adjusted;
+      if (rsiValue === null || rsiValue === undefined) {
+        return { valid: false, reason: 'RSI value is null' };
+      }
+      if (rsiValue < settings.sniperRsiMin) {
+        return { valid: false, reason: `RSI ${rsiValue.toFixed(0)}% < ${settings.sniperRsiMin}% min` };
+      }
+      if (rsiValue > settings.sniperRsiMax) {
+        return { valid: false, reason: `RSI ${rsiValue.toFixed(0)}% > ${settings.sniperRsiMax}% max` };
+      }
+      
+      // Status filter
+      if (bounty.status === 'Unknown') {
+        return { valid: false, reason: 'unknown status' };
+      }
+      
+      if (bounty.status === 'Okay') {
+        if (!settings.sniperShowOkay) {
+          return { valid: false, reason: 'Okay (setting disabled)' };
+        }
+      }
+      
+      if (bounty.status === 'Hospital') {
+        if (!settings.sniperShowHospital) {
+          return { valid: false, reason: 'Hospital (setting disabled)' };
+        }
+        if (bounty.hospitalTime === null || bounty.hospitalTime > settings.sniperHospitalMins) {
+          return { valid: false, reason: `Hospital ${bounty.hospitalTime?.toFixed(0) || '?'} mins > ${settings.sniperHospitalMins} threshold` };
+        }
+      }
+      
+      if (bounty.status === 'Traveling') {
+        if (!settings.sniperShowTraveling) {
+          return { valid: false, reason: 'Traveling (setting disabled)' };
+        }
+      }
+      
+      return { valid: true, reason: null };
+    }
+
+    // Count how many candidates have been checked (have fresh cache)
+    function getCheckedCount() {
+      const now = Date.now();
+      return cachedCandidates.filter(c => {
+        const cached = rsiCache.get(c.userId);
+        return cached && (now - cached.timestamp) < RSI_CACHE_TTL;
+      }).length;
+    }
+
+    // Verify targets currently in panel are still valid
+    // Returns number of API calls made
+    async function verifyPanelTargets() {
+      const now = Date.now();
+      let apiCallsMade = 0;
+      const targetsToRemove = [];
+
+      for (const [userId, target] of verifiedTargets) {
+        // Check if target needs re-verification (every 60 seconds)
+        const lastVerified = targetLastVerified.get(userId) || 0;
+        if ((now - lastVerified) < TARGET_VERIFY_TTL) {
+          continue;  // Recently verified, skip
+        }
+
+        // Check API budget
+        if (!canUseApi()) {
+          console.log('BountySniper: API budget exhausted during target verification');
+          break;
+        }
+
+        // Re-fetch player data with FORCE REFRESH to bypass cache
+        console.log(`BountySniper: Verifying target: ${target.name} (forcing fresh API call)`);
+        const rsi = await getRsi(userId, true);  // true = force refresh, bypass cache
+        apiCallsMade++;
+        targetLastVerified.set(userId, now);
+
+        if (!rsi) {
+          console.log(`BountySniper: ⚠ Could not verify ${target.name} - API error`);
+          continue;  // Keep target for now, will retry next cycle
+        }
+
+        // Log the status change detection
+        const oldStatus = target.status;
+        const newStatus = rsi.status;
+        if (oldStatus !== newStatus) {
+          console.log(`BountySniper: ⚡ Status CHANGED for ${target.name}: ${oldStatus} -> ${newStatus}`);
+        }
+
+        // Update target data with fresh API results
+        target.rsi = rsi;
+        target.status = rsi.status;
+        target.hospitalTime = rsi.hospitalTime;
+
+        // Check if still valid against current settings
+        const result = isGoodTarget(target);
+        if (!result.valid) {
+          console.log(`BountySniper: 🔴 Target no longer valid: ${target.name} - ${result.reason}`);
+          targetsToRemove.push(userId);
+        } else {
+          console.log(`BountySniper: ✅ Target still valid: ${target.name} (${target.status}, RSI: ${rsi.adjusted?.toFixed(0) || '?'}%)`);
+          target.valueScore = calculateValueScore(target);
+        }
+
+        // Throttled delay between API calls
+        await new Promise(r => setTimeout(r, API_CALL_DELAY));
+      }
+
+      // Remove invalid targets
+      for (const userId of targetsToRemove) {
+        verifiedTargets.delete(userId);
+        targetLastVerified.delete(userId);
+      }
+
+      // Also remove from targets array
+      if (targetsToRemove.length > 0) {
+        targets = targets.filter(t => !targetsToRemove.includes(t.userId));
+        renderPanel();
+        broadcastTargets();
+      }
+
+      return apiCallsMade;
+    }
+
+    // Audio context (persistent, unlocked on user gesture)
+    let audioCtx = null;
+    let audioUnlocked = false;
+
+    // Unlock audio on first user interaction
+    function unlockAudio() {
+      if (audioUnlocked) return;
+      
+      try {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        
+        // Create and play a silent buffer to unlock
+        const buffer = audioCtx.createBuffer(1, 1, 22050);
+        const source = audioCtx.createBufferSource();
+        source.buffer = buffer;
+        source.connect(audioCtx.destination);
+        source.start(0);
+        
+        audioUnlocked = true;
+        console.log('BountySniper: Audio unlocked');
+      } catch (e) {
+        console.log('BountySniper: Audio unlock failed', e);
+      }
+    }
+
+    // Play alert sound
+    function playAlertSound() {
+      try {
+        // Create context if needed
+        if (!audioCtx) {
+          audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        }
+        
+        // Resume if suspended (browser policy)
+        if (audioCtx.state === 'suspended') {
+          audioCtx.resume().then(() => {
+            playBeep();
+          }).catch(e => {
+            console.log('BountySniper: Could not resume audio context', e);
+          });
+        } else {
+          playBeep();
+        }
+      } catch (e) {
+        console.log('BountySniper: Audio not available', e);
+      }
+    }
+
+    // Actually play the beep sound
+    function playBeep() {
+      if (!audioCtx) return;
+      
+      try {
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        
+        // Two-tone alert (more noticeable)
+        osc.frequency.value = 880;  // A5
+        gain.gain.value = 0.3;
+        osc.start();
+        
+        // Frequency sweep for attention
+        osc.frequency.setValueAtTime(880, audioCtx.currentTime);
+        osc.frequency.setValueAtTime(1100, audioCtx.currentTime + 0.1);
+        osc.frequency.setValueAtTime(880, audioCtx.currentTime + 0.2);
+        
+        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
+        osc.stop(audioCtx.currentTime + 0.3);
+        
+        console.log('BountySniper: 🔊 Alert sound played');
+      } catch (e) {
+        console.log('BountySniper: Beep failed', e);
+      }
+    }
+
+    // Format reward for display
+    function formatReward(reward) {
+      if (reward >= 1000000) return `$${(reward / 1000000).toFixed(1)}M`;
+      if (reward >= 1000) return `$${Math.round(reward / 1000)}k`;
+      return `$${reward}`;
+    }
+
+    // Update status text in panel
+    function updateStatus(text) {
+      if (!panelEl) return;
+      const status = panelEl.querySelector('.ff-sniper-status');
+      if (status) {
+        const roleIndicator = isLeader ? '<span class="leader">●</span>' : '<span class="follower">●</span>';
+        const budget = `${apiCallsThisMinute}/${settings.sniperApiBudget}`;
+        status.innerHTML = `${roleIndicator} ${text} | API: ${budget}/min`;
+      }
+    }
+
+    // Render the sniper panel UI
+    function renderPanel() {
+      if (!panelEl) {
+        createPanel();
+      }
+
+      const badge = panelEl.querySelector('.ff-sniper-badge');
+      const list = panelEl.querySelector('.ff-sniper-list');
+      const status = panelEl.querySelector('.ff-sniper-status');
+
+      // Update badge count
+      if (badge) {
+        badge.textContent = targets.length;
+        badge.className = `ff-sniper-badge${targets.length === 0 ? ' empty' : ''}`;
+      }
+
+      // Update list
+      if (list) {
+        if (targets.length === 0) {
+          list.innerHTML = '<div style="padding:10px;text-align:center;color:#666;font-style:italic;">No targets found</div>';
+        } else {
+          list.innerHTML = targets.map(t => {
+            const rsiClass = !t.rsi ? '' : t.rsi.adjusted < settings.lowHigh ? 'high' : t.rsi.adjusted < settings.highMed ? 'med' : 'low';
+            const rsiText = t.rsi ? `${Math.round(t.rsi.adjusted)}%` : '...';
+            const beatenIcon = t.beaten?.wins > 0 ? `<span class="ff-sniper-beaten" title="Beat ${t.beaten.wins}x">⭐</span>` : '';
+            
+            return `
+              <div class="ff-sniper-item">
+                <span class="ff-sniper-rsi ${rsiClass}">${rsiText}</span>
+                <span class="ff-sniper-name">
+                  <a href="https://www.torn.com/profiles.php?XID=${t.userId}" target="_blank">${escapeHtml(t.name)}</a>
+                  ${beatenIcon}
+                </span>
+                <span class="ff-sniper-reward">${formatReward(t.reward)}</span>
+                <a class="ff-sniper-atk" href="https://www.torn.com/loader.php?sid=attack&user2ID=${t.userId}" target="_blank">ATK</a>
+              </div>
+            `;
+          }).join('');
+        }
+      }
+
+      // Update status
+      if (status) {
+        const budget = `${apiCallsThisMinute}/${settings.sniperApiBudget}`;
+        status.innerHTML = `<span class="scanning">Scanning</span> | API: ${budget}/min`;
+      }
+    }
+
+    // Create the panel element
+    function createPanel() {
+      // DUPLICATE PREVENTION: Check if panel already exists
+      if (panelCreated || document.querySelector('.ff-sniper-panel')) {
+        console.log('BountySniper: Panel already exists, skipping creation');
+        // If panelEl is null but DOM has panel, grab reference
+        if (!panelEl) {
+          panelEl = document.querySelector('.ff-sniper-panel');
+        }
+        return;
+      }
+      
+      // Load saved collapsed state
+      try {
+        const savedCollapsed = localStorage.getItem(STORAGE_KEY_COLLAPSED);
+        if (savedCollapsed !== null) {
+          isCollapsed = JSON.parse(savedCollapsed);
+        }
+      } catch (e) {}
+      
+      panelEl = document.createElement('div');
+      panelEl.className = 'ff-sniper-panel' + (isCollapsed ? ' collapsed' : '') + (!isLeader ? ' follower' : '');
+      panelEl.setAttribute('data-tab-id', TAB_ID);  // Mark which tab created this
+      panelEl.innerHTML = `
+        <div class="ff-sniper-header">
+          <span class="ff-sniper-title">
+            🎯 <span>Sniper</span>
+            <span class="ff-sniper-badge empty">0</span>
+            <span class="ff-sniper-leader-btn" title="Click to make this tab the leader">📡</span>
+          </span>
+          <span class="ff-sniper-toggle">${isCollapsed ? '▶' : '▼'}</span>
+        </div>
+        <div class="ff-sniper-list"></div>
+        <div class="ff-sniper-status">Initializing...</div>
+      `;
+
+      // Toggle collapse on toggle button click only (not whole header - that's for drag)
+      const toggle = panelEl.querySelector('.ff-sniper-toggle');
+      toggle.addEventListener('click', (e) => {
+        e.stopPropagation();
+        unlockAudio();  // Unlock audio on user interaction
+        isCollapsed = !isCollapsed;
+        panelEl.classList.toggle('collapsed', isCollapsed);
+        toggle.textContent = isCollapsed ? '▶' : '▼';
+        // Save collapsed state
+        try {
+          localStorage.setItem(STORAGE_KEY_COLLAPSED, JSON.stringify(isCollapsed));
+        } catch (err) {}
+      });
+
+      // Unlock audio on any click on the panel
+      panelEl.addEventListener('click', () => {
+        unlockAudio();
+      }, { once: true });  // Only need to unlock once
+
+      // Click satellite icon to become leader (only visible on followers)
+      const leaderBtn = panelEl.querySelector('.ff-sniper-leader-btn');
+      leaderBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (!isLeader) {
+          forceLeadership();
+        }
+      });
+
+      document.body.appendChild(panelEl);
+      panelCreated = true;  // Mark as created
+      
+      // Apply saved position
+      const pos = getSavedPosition();
+      applyPosition(pos.x, pos.y);
+      
+      // Setup drag listeners
+      setupDragListeners();
+      
+      // Update role display
+      updatePanelRole();
+      
+      // Unlock audio on any document interaction (for sound alerts)
+      document.addEventListener('click', unlockAudio, { once: true });
+      document.addEventListener('touchstart', unlockAudio, { once: true });
+    }
+
+    // Start the sniper
+    function start() {
+      if (!settings.sniperEnabled) return;
+      
+      console.log(`BountySniper: Starting on ${isMobilePDA ? 'MOBILE/PDA' : 'DESKTOP'} (Tab: ${TAB_ID})`);
+      
+      // DUPLICATE PREVENTION: Check for existing panels on page
+      const existingPanels = document.querySelectorAll('.ff-sniper-panel');
+      if (existingPanels.length > 1) {
+        console.log('BountySniper: Multiple panels detected, removing extras');
+        for (let i = 1; i < existingPanels.length; i++) {
+          existingPanels[i].remove();
+        }
+      }
+      
+      isEnabled = true;
+      receivedUpdatesDuringDelay = false;
+      
+      // Check if there's an ACTIVE leader (heartbeat within timeout) - another tab scanning
+      const currentLeader = localStorage.getItem(STORAGE_KEY_LEADER);
+      const lastHeartbeat = parseInt(localStorage.getItem(STORAGE_KEY_HEARTBEAT) || '0', 10);
+      const heartbeatAge = Date.now() - lastHeartbeat;
+      const hasActiveLeader = currentLeader && currentLeader !== TAB_ID && heartbeatAge < LEADER_TIMEOUT;
+      
+      console.log(`BountySniper: Leadership check - activeLeader: ${hasActiveLeader}, heartbeatAge: ${(heartbeatAge/1000).toFixed(0)}s`);
+      
+      // ALWAYS try to load saved state - loadFullState() has built-in 5-minute freshness check
+      // Returns true if fresh data was loaded, false if stale/missing
+      const hasFreshState = loadFullState();
+      
+      console.log(`BountySniper: loadFullState returned ${hasFreshState} (has fresh saved data: ${hasFreshState})`);
+      
+      if (!hasFreshState) {
+        // No fresh state - clear any stale data and start fresh
+        console.log('BountySniper: No fresh state - starting clean');
+        targets = [];
+        cachedCandidates = [];
+        cachedBounties = [];
+        verifiedTargets.clear();
+        rsiCache.clear();
+      }
+      
+      // Setup cross-tab sync
+      setupStorageListener();
+      
+      // Create panel
+      if (!panelEl) {
+        createPanel();
+      }
+      panelEl.style.display = 'block';
+      
+      // Mark navigation for future page loads
+      window.addEventListener('beforeunload', markNavigating);
+      window.addEventListener('pagehide', markNavigating);
+      
+      // DECISION: Should we delay leadership claim?
+      // Delay if: another tab is actively leading, OR we have fresh state to preserve
+      const shouldDelayLeadership = hasActiveLeader || hasFreshState;
+      
+      console.log(`BountySniper: shouldDelay=${shouldDelayLeadership} (activeLeader=${hasActiveLeader}, hasFreshState=${hasFreshState})`);
+      
+      if (shouldDelayLeadership) {
+        // Start as provisional follower - preserve data, wait before claiming leadership
+        isProvisionalFollower = true;
+        isLeader = false;
+        updatePanelRole();
+        renderPanel();
+        updateStatus(`${targets.length} targets | Syncing...`);
+        
+        console.log(`BountySniper: Starting as PROVISIONAL FOLLOWER (delay: ${LEADERSHIP_CLAIM_DELAY/1000}s)`);
+        
+        // Start heartbeat checking (storage events will handle target updates)
+        heartbeatInterval = setInterval(() => {
+          if (isLeader) {
+            checkLeader();
+          }
+        }, HEARTBEAT_INTERVAL);
+        
+        // DELAYED LEADERSHIP CLAIM
+        leadershipClaimTimer = setTimeout(() => {
+          isProvisionalFollower = false;
+          
+          // Check if we received updates during the delay
+          if (receivedUpdatesDuringDelay) {
+            console.log('BountySniper: Received updates during delay, staying as follower');
+            // Continue as follower, check if leader is still alive
+            checkLeader();
+          } else {
+            // No updates received, check if we should become leader
+            const nowHeartbeat = parseInt(localStorage.getItem(STORAGE_KEY_HEARTBEAT) || '0', 10);
+            const nowAge = Date.now() - nowHeartbeat;
+            
+            if (nowAge > LEADER_TIMEOUT) {
+              console.log(`BountySniper: No leader activity for ${(nowAge/1000).toFixed(0)}s, claiming leadership`);
+              tryBecomeLeader();  // This now starts scanning if we become leader
+            } else {
+              console.log('BountySniper: Leader is active, remaining as follower');
+            }
+          }
+          
+          // Setup visibility tracking after delay (for both mobile and desktop)
+          setupVisibilityTracking();
+          
+        }, LEADERSHIP_CLAIM_DELAY);
+        
+      } else {
+        // No active leader: immediate start as leader
+        console.log('BountySniper: No active leader detected, starting as LEADER immediately');
+        isProvisionalFollower = false;
+        tryBecomeLeader();  // This now starts scanning if we become leader
+        
+        // Start heartbeat interval
+        heartbeatInterval = setInterval(() => {
+          checkLeader();
+        }, HEARTBEAT_INTERVAL);
+        
+        // Setup visibility tracking
+        setupVisibilityTracking();
+        
+        // Render empty panel
+        renderPanel();
+        updateStatus('Starting scan...');
+      }
+      
+      // Setup watchdog for crash recovery
+      setupWatchdog();
+    }
+
+    // Start scanning as leader (extracted for reuse)
+    function startLeaderScanning() {
+      scan();
+      
+      // Set up scan interval
+      const intervalMs = settings.sniperFetchInterval * 1000;
+      if (scanInterval) {
+        clearInterval(scanInterval);
+      }
+      scanInterval = setInterval(() => {
+        if (isLeader) {
+          scan();
+          broadcastScanState();
+        }
+      }, intervalMs);
+      
+      console.log(`BountySniper: Started as LEADER (interval: ${settings.sniperFetchInterval}s, budget: ${settings.sniperApiBudget}/min)`);
+    }
+
+    // Stop the sniper
+    function stop() {
+      isEnabled = false;
+      
+      if (scanInterval) {
+        clearInterval(scanInterval);
+        scanInterval = null;
+      }
+      
+      if (heartbeatInterval) {
+        clearInterval(heartbeatInterval);
+        heartbeatInterval = null;
+      }
+      
+      if (visibilityCheckInterval) {
+        clearInterval(visibilityCheckInterval);
+        visibilityCheckInterval = null;
+      }
+      
+      if (watchdogInterval) {
+        clearInterval(watchdogInterval);
+        watchdogInterval = null;
+      }
+      
+      if (leadershipClaimTimer) {
+        clearTimeout(leadershipClaimTimer);
+        leadershipClaimTimer = null;
+      }
+      
+      // Save state before stopping (for mobile navigation)
+      if (isLeader) {
+        saveFullState();
+        localStorage.removeItem(STORAGE_KEY_LEADER);
+        isLeader = false;
+      }
+      
+      if (panelEl) {
+        panelEl.style.display = 'none';
+      }
+      console.log('BountySniper: Stopped');
+    }
+
+    // Toggle sniper on/off
+    function toggle(enabled) {
+      if (enabled) {
+        start();
+      } else {
+        stop();
+      }
+    }
+
+    // Cleanup when tab is closing
+    function cleanup() {
+      // Save state before leaving (critical for mobile)
+      if (isLeader) {
+        saveFullState();
+        markNavigating();
+        // Give up leadership so other tabs can take over
+        localStorage.removeItem(STORAGE_KEY_LEADER);
+        console.log('BountySniper: Saved state and released leadership on tab close');
+      } else {
+        markNavigating();
+      }
+    }
+
+    // Listen for tab close/unload
+    window.addEventListener('beforeunload', cleanup);
+    window.addEventListener('pagehide', cleanup);
+
+    // Public API
+    return {
+      start,
+      stop,
+      toggle,
+      scan,
+      getTargets: () => targets,
+      isRunning: () => isEnabled,
+      isLeader: () => isLeader,
+      getTabId: () => TAB_ID
+    };
+  })();
+
+  // ============================================================================
   // CONSOLIDATED OBSERVER MANAGER
   // ============================================================================
 
@@ -2344,8 +5585,28 @@
       // Profile injection
       injectProfile();
 
-      // List items
+      // List items (faction, user lists)
       document.querySelectorAll('div[class*="honorWrap"]').forEach(injectListItem);
+
+      // Bounty page injection
+      if (location.href.includes('bounties.php')) {
+        // Find all list items that contain profile links
+        document.querySelectorAll('li').forEach(li => {
+          const profileLink = li.querySelector('a[href*="profiles.php?XID="]');
+          if (profileLink && li.getAttribute('data-ff-bounty') !== '1') {
+            injectBountyItem(li);
+          }
+        });
+        
+        // Also check for any profile links in table-like structures
+        document.querySelectorAll('a[href*="profiles.php?XID="]').forEach(link => {
+          // Find the row container (li, tr, or div)
+          const row = link.closest('li') || link.closest('tr') || link.closest('[class*="row"]');
+          if (row && row.getAttribute('data-ff-bounty') !== '1') {
+            injectBountyItem(row);
+          }
+        });
+      }
 
       // Market attack buttons (seller list)
       document.querySelectorAll('[class*="sellerListWrapper"] ul a[href*="profiles.php?XID="]')
@@ -2503,6 +5764,7 @@
       <h3>ATK Scouter Settings v${VERSION}</h3>
       <div class="ff-tabs">
         <div class="ff-tab active" data-tab="settings">⚙️ Settings</div>
+        <div class="ff-tab" data-tab="sniper">🎯 Sniper</div>
         <div class="ff-tab" data-tab="stats">📊 Stats</div>
         <div class="ff-tab" data-tab="apikey">🔑 API Key</div>
       </div>
@@ -2515,6 +5777,61 @@
         <input type="number" step="0.01" id="ff-lw" value="${settings.lifeWeight}" min="0" max="1">
         <label>Drug weight (0–1)</label>
         <input type="number" step="0.01" id="ff-dw" value="${settings.drugWeight}" min="0" max="1">
+      </div>
+      <div class="ff-tab-content" id="tab-sniper">
+        <label style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
+          <input type="checkbox" id="ff-sniper-enabled" ${settings.sniperEnabled ? 'checked' : ''}>
+          <span style="font-weight:600;">Enable Bounty Sniper</span>
+        </label>
+        <hr style="border:none;border-top:1px solid #444;margin:10px 0;">
+        <label>Min Reward ($)</label>
+        <input type="number" id="ff-sniper-minreward" value="${settings.sniperMinReward}" min="0" step="10000">
+        <label>Max Level</label>
+        <input type="number" id="ff-sniper-maxlevel" value="${settings.sniperMaxLevel}" min="1" max="100">
+        <div style="display:flex;gap:10px;">
+          <div style="flex:1;">
+            <label>RSI Min (%)</label>
+            <input type="number" id="ff-sniper-rsimin" value="${settings.sniperRsiMin}" min="0" max="500">
+          </div>
+          <div style="flex:1;">
+            <label>RSI Max (%)</label>
+            <input type="number" id="ff-sniper-rsimax" value="${settings.sniperRsiMax}" min="0" max="500">
+          </div>
+        </div>
+        <hr style="border:none;border-top:1px solid #444;margin:10px 0;">
+        <label>Status Filters</label>
+        <div style="display:flex;flex-wrap:wrap;gap:12px;margin:8px 0;">
+          <label style="display:flex;align-items:center;gap:4px;">
+            <input type="checkbox" id="ff-sniper-showokay" ${settings.sniperShowOkay ? 'checked' : ''}>
+            <span>Okay</span>
+          </label>
+          <label style="display:flex;align-items:center;gap:4px;">
+            <input type="checkbox" id="ff-sniper-showhospital" ${settings.sniperShowHospital ? 'checked' : ''}>
+            <span>Hospital</span>
+          </label>
+          <label style="display:flex;align-items:center;gap:4px;">
+            <input type="checkbox" id="ff-sniper-showtraveling" ${settings.sniperShowTraveling ? 'checked' : ''}>
+            <span>Traveling</span>
+          </label>
+        </div>
+        <label>Hospital threshold (mins) - show if less than:</label>
+        <input type="number" id="ff-sniper-hospitalmins" value="${settings.sniperHospitalMins}" min="0" max="60">
+        <hr style="border:none;border-top:1px solid #444;margin:10px 0;">
+        <label>Pages to Scan (1-20)</label>
+        <input type="number" id="ff-sniper-pagestoscan" value="${settings.sniperPagesToScan}" min="1" max="20">
+        <label>API Budget (calls/min)</label>
+        <input type="number" id="ff-sniper-apibudget" value="${settings.sniperApiBudget}" min="1" max="50">
+        <label>Sort By</label>
+        <select id="ff-sniper-sortby" style="width:100%;padding:6px;background:#333;color:#eee;border:1px solid #555;border-radius:4px;">
+          <option value="value" ${settings.sniperSortBy === 'value' ? 'selected' : ''}>Value Score (recommended)</option>
+          <option value="reward" ${settings.sniperSortBy === 'reward' ? 'selected' : ''}>Highest Reward</option>
+          <option value="rsi" ${settings.sniperSortBy === 'rsi' ? 'selected' : ''}>Highest RSI</option>
+          <option value="beaten" ${settings.sniperSortBy === 'beaten' ? 'selected' : ''}>Previously Beaten</option>
+        </select>
+        <label style="display:flex;align-items:center;gap:8px;margin-top:10px;">
+          <input type="checkbox" id="ff-sniper-soundalert" ${settings.sniperSoundAlert ? 'checked' : ''}>
+          <span>Sound alert for new targets</span>
+        </label>
       </div>
       <div class="ff-tab-content" id="tab-stats">
         <div id="ff-stats-content">
@@ -2587,6 +5904,21 @@
       if (!isNaN(v2)) Env.setValue('threshold_highMed', v2);
       if (!isNaN(v3)) Env.setValue('lifeWeight', v3);
       if (!isNaN(v4)) Env.setValue('drugWeight', v4);
+
+      // Save sniper settings
+      Env.setValue('sniperEnabled', modal.querySelector('#ff-sniper-enabled')?.checked || false);
+      Env.setValue('sniperMinReward', parseInt(modal.querySelector('#ff-sniper-minreward')?.value) || DEFAULTS.sniperMinReward);
+      Env.setValue('sniperMaxLevel', parseInt(modal.querySelector('#ff-sniper-maxlevel')?.value) || DEFAULTS.sniperMaxLevel);
+      Env.setValue('sniperRsiMin', parseInt(modal.querySelector('#ff-sniper-rsimin')?.value) || DEFAULTS.sniperRsiMin);
+      Env.setValue('sniperRsiMax', parseInt(modal.querySelector('#ff-sniper-rsimax')?.value) || DEFAULTS.sniperRsiMax);
+      Env.setValue('sniperShowOkay', modal.querySelector('#ff-sniper-showokay')?.checked || false);
+      Env.setValue('sniperShowHospital', modal.querySelector('#ff-sniper-showhospital')?.checked || false);
+      Env.setValue('sniperShowTraveling', modal.querySelector('#ff-sniper-showtraveling')?.checked || false);
+      Env.setValue('sniperHospitalMins', parseInt(modal.querySelector('#ff-sniper-hospitalmins')?.value) || DEFAULTS.sniperHospitalMins);
+      Env.setValue('sniperPagesToScan', Math.min(20, Math.max(1, parseInt(modal.querySelector('#ff-sniper-pagestoscan')?.value) || DEFAULTS.sniperPagesToScan)));
+      Env.setValue('sniperApiBudget', parseInt(modal.querySelector('#ff-sniper-apibudget')?.value) || DEFAULTS.sniperApiBudget);
+      Env.setValue('sniperSortBy', modal.querySelector('#ff-sniper-sortby')?.value || DEFAULTS.sniperSortBy);
+      Env.setValue('sniperSoundAlert', modal.querySelector('#ff-sniper-soundalert')?.checked || false);
 
       location.reload();
     });
@@ -2762,6 +6094,64 @@
   // INITIALIZATION
   // ============================================================================
 
+  /**
+   * Auto-sync learning model from IndexedDB fights
+   * Runs once on startup if learning model is empty but fights exist
+   */
+  async function autoSyncLearningModel() {
+    try {
+      const hist = Env.getValue('ff_lrsi_hist', []) || [];
+      
+      // Only auto-sync if learning model is empty
+      if (hist.length > 0) return;
+      
+      const fights = await FightDB.getAllFights();
+      if (!fights || fights.length < 3) return; // Need at least 3 fights
+      
+      // Convert fights to learning format
+      const samples = [];
+      for (const fight of fights) {
+        const rsi = fight.rsiAdjusted || fight.rsiRaw;
+        if (rsi === null || rsi === undefined) continue;
+        if (fight.outcome !== 'win' && fight.outcome !== 'loss') continue;
+        
+        samples.push({
+          x: rsi - 100,
+          y: fight.outcome === 'win' ? 1 : 0,
+          ts: fight.capturedAt || Date.now()
+        });
+      }
+      
+      if (samples.length < 3) return;
+      
+      // Perform logistic regression fit
+      let t0 = 0, t1 = 0.12;
+      const lr = 0.05;
+      for (let iter = 0; iter < 100; iter++) {
+        let g0 = 0, g1 = 0;
+        for (const s of samples) {
+          const p = 1 / (1 + Math.exp(-(t0 + t1 * s.x)));
+          const err = s.y - p;
+          g0 += err;
+          g1 += err * s.x;
+        }
+        t0 += lr * g0 / samples.length;
+        t1 += lr * g1 / samples.length;
+      }
+      t1 = Math.max(0.01, Math.min(0.5, t1));
+      
+      // Save to learning model
+      Env.setValue('ff_lrsi_theta0', t0);
+      Env.setValue('ff_lrsi_theta1', t1);
+      Env.setValue('ff_lrsi_hist', samples);
+      Env.setValue('ff_lrsi_meta', { n: samples.length, ts: Date.now() });
+      
+      console.log(`ATK Scouter: Auto-synced learning model from ${samples.length} fights (θ0=${t0.toFixed(3)}, θ1=${t1.toFixed(3)})`);
+    } catch (e) {
+      console.error('ATK Scouter: Auto-sync failed', e);
+    }
+  }
+
   function init() {
     console.log('ATK Scouter v' + VERSION + ' initializing...');
     
@@ -2770,6 +6160,9 @@
 
     // Check if on attack-related page immediately
     FightCapture.setupAttackPageObserver();
+    
+    // Auto-sync learning model from IndexedDB (runs async in background)
+    autoSyncLearningModel();
   }
 
   // Start when DOM is ready
