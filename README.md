@@ -136,7 +136,7 @@ Install a userscript manager:
 3. Tap **"+"** to add new script
 4. **Script URL**: 
    ```
-   https://raw.githubusercontent.com/yourusername/atk-scouter/main/ATK_Scouter_v2_1_12_FINAL.js
+   https://raw.githubusercontent.com/infodump01/LE-Scouter/main/LE_Scouter_Working_Prototype.js
    ```
 5. **Injection time**: `END` (important!)
 6. **Name**: ATK Scouter
